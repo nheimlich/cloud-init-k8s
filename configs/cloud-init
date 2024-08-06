@@ -1,0 +1,93 @@
+#cloud-config
+package_update: false
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/bin/setup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      set -x
+      export DEBIAN_FRONTEND=noninteractive
+
+      apt-get update && apt-get install -y ca-certificates curl gnupg apt-transport-https
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+      
+      apt-get update && apt-get install containerd.io kubelet kubeadm kubectl -y 
+      apt-mark hold kubelet kubeadm kubectl
+
+      modprobe overlay
+      modprobe br_netfilter
+      sysctl --system
+      sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+
+      echo "configuring containerd"
+      test -d /etc/containerd || mkdir -p /etc/containerd
+      rm -f /etc/containerd/config.toml
+      containerd config default | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
+
+      crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock
+      systemctl restart containerd
+
+  - path: /usr/local/bin/kubeadm-0.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      kubeadm init --upload-certs --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans $(mdata-get tag).svc.$(mdata-get account).us-central-1.triton.zone
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      echo "export KUBECONFIG=/etc/kubernetes/admin.conf" | tee -a /root/.bashrc
+
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
+
+      CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+      CLI_ARCH=amd64
+
+      curl -LO --fail https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
+      tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+     
+      cilium install -f /root/cilium-config
+
+  - path: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+  - path: /root/cilium-config
+    content: |
+      gatewayAPI:
+        enabled: true
+        hostNetwork:
+          enabled: true
+      envoy:
+        securityContext:
+          privileged: true
+          capabilities:
+            keepCapNetBindService: true
+      securityContext:
+        privileged: true
+        capabilities:
+          ciliumAgent:
+          - NET_BIND_SERVICE
+
+  - path: /etc/sysctl.d/k8s.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+
+runcmd:
+  - /usr/local/bin/setup.sh
+  - /usr/local/bin/kubeadm-0.sh
