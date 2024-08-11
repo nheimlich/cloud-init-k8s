@@ -36,8 +36,6 @@ write_files:
       crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock
       systemctl restart containerd
 
-      mkdir -p /var/k8s/
-
       case $(hostname -s) in
         *-0*) /usr/local/bin/kubeadm-0.sh;;
         *-[1-2]*) /usr/local/bin/kubeadm-ctr.sh;;
