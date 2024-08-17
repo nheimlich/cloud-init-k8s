@@ -36,10 +36,10 @@ write_files:
       crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock
       systemctl restart containerd
 
-      case $(hostname -s) in
-        *-0*) /usr/local/bin/kubeadm-0.sh;;
-        *-[1-2]*) /usr/local/bin/kubeadm-ctr.sh;;
-        *-[3-5]*) /usr/local/bin/kubeadm-wrk.sh;;
+      case $(mdata-get tag) in
+        init) /usr/local/bin/kubeadm-0.sh;;
+        ctr) /usr/local/bin/kubeadm-ctr.sh;;
+        wrk) /usr/local/bin/kubeadm-wrk.sh;;
         *) echo "done";;
       esac
 
@@ -52,13 +52,17 @@ write_files:
       apt-get install busybox -y
       mkdir -p /var/k8s/
 
-      kubeadm init --upload-certs --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans $(mdata-get tag).svc.$(mdata-get account).us-central-1.triton.zone --control-plane-endpoint $(mdata-get tag).svc.$(mdata-get account).us-central-1.cns.mnx.io
+      kubeadm init --upload-certs --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans ctr.svc.$(mdata-get account).us-central-1.triton.zone --control-plane-endpoint ctr.svc.$(mdata-get account).us-central-1.cns.mnx.io
 
       echo $(kubeadm token create --print-join-command) --control-plane --certificate-key $(kubeadm init phase upload-certs --upload-certs | grep -vw -e certificate -e Namespace) > /var/k8s/join-ctr.sh
-      echo $(kubeadm token create --print-join-command) > /var/k8s/join-wrk.sh
+
+      busybox httpd -p 8000 -h /var/k8s/
 
       export KUBECONFIG=/etc/kubernetes/admin.conf
       echo "export KUBECONFIG=/etc/kubernetes/admin.conf" | tee -a /root/.bashrc
+
+      sed -i'' 's/cns\.mnx\.io/triton\.zone/g' /etc/kubernetes/admin.conf
+      cat /etc/kubernetes/admin.conf | mdata-put admin.conf
 
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
@@ -75,14 +79,19 @@ write_files:
 
       cilium install -f /root/cilium-config
 
-      busybox httpd -p 8000 -h /var/k8s/
+      expected_ctr_count=$(mdata-get ctr_count)
+      expected_wrk_count=$(mdata-get wrk_count)
+      expected_count=$((expected_ctr_count + expected_wrk_count))
 
-      while [[ $(kubectl get nodes --no-headers | wc -l) -lt 6 ]]; do sleep 5; done
+      while [[ $(kubectl get nodes --no-headers | wc -l) -lt $expected_ctr_count ]]; do sleep 10; done
+
+      echo $(kubeadm token create --print-join-command) > /var/k8s/join-wrk.sh
+      while [[ $(kubectl get nodes --no-headers | wc -l) -lt $expected_count ]]; do sleep 10; done
 
       pkill -f busybox
       
       # wait for nodes to register with default "control-plane" labels
-      sleep 15
+      while [[ $(kubectl get nodes --no-headers -l node-role.kubernetes.io/control-plane | wc -l) -lt $expected_ctr_count ]]; do sleep 10; done
 
       kubectl label $(kubectl get nodes --no-headers --selector node-role.kubernetes.io/control-plane!="" -oname) node-role.kubernetes.io/data-plane=""
 
@@ -96,7 +105,7 @@ write_files:
       kubeadm config images pull --kubernetes-version v1.29.7
 
       export ACCT=$(mdata-get account)
-      export SRC=$(hostname -s | sed -e 's/[12345]/0/g').inst.$ACCT.us-central-1.cns.mnx.io
+      export SRC=init.svc.$ACCT.us-central-1.cns.mnx.io
 
       while [[ "$(curl -k -s -o /dev/null -w ''%{http_code}'' http://$SRC:8000/join-ctr.sh)" != "200" ]]; do sleep 5; done
 
@@ -112,7 +121,7 @@ write_files:
       kubeadm config images pull --kubernetes-version v1.29.7
 
       export ACCT=$(mdata-get account)
-      export SRC=$(hostname -s | sed -e 's/[12345]/0/g').inst.$ACCT.us-central-1.cns.mnx.io
+      export SRC=init.svc.$ACCT.us-central-1.cns.mnx.io
 
       while [[ "$(curl -k -s -o /dev/null -w ''%{http_code}'' http://$SRC:8000/join-wrk.sh)" != "200" ]]; do sleep 5; done
 
