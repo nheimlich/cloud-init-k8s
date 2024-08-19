@@ -1,0 +1,91 @@
+#cloud-config
+package_update: false
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/bin/setup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      set -x
+
+      DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y wget ca-certificates curl gnupg apt-transport-https
+
+      /usr/local/bin/binaries.sh
+
+      modprobe overlay
+      modprobe br_netfilter
+      sysctl --system
+      sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+
+      #configuring containerd
+      test -d /etc/containerd || mkdir -p /etc/containerd
+      rm -f /etc/containerd/config.toml
+      containerd config default | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
+
+      wget -P "/etc/systemd/system/" -q --show-progress --https-only --timestamping https://raw.githubusercontent.com/containerd/containerd/main/containerd.service
+      systemctl daemon-reload
+      systemctl enable --now containerd
+      crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock
+      systemctl restart containerd
+
+  - path: /usr/local/bin/binaries.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+
+      KUBE_VER="v1.23.0"
+      ETCD_VER="v3.5.0"
+      CRIT_VER="v1.30.1"
+      RUNC_VER="v1.0.0"
+      CNTD_VER="1.5.0"
+      TEMP_DIR=$(mktemp -d)
+      
+      # Define URLs
+      URLS=(
+          "https://storage.googleapis.com/kubernetes-release/release/$KUBE_VER/bin/linux/amd64/kubectl"
+          "https://storage.googleapis.com/kubernetes-release/release/$KUBE_VER/bin/linux/amd64/kube-apiserver"
+          "https://storage.googleapis.com/kubernetes-release/release/$KUBE_VER/bin/linux/amd64/kube-controller-manager"
+          "https://storage.googleapis.com/kubernetes-release/release/$KUBE_VER/bin/linux/amd64/kube-scheduler"
+          "https://storage.googleapis.com/kubernetes-release/release/$KUBE_VER/bin/linux/amd64/kubelet"
+          "https://github.com/etcd-io/etcd/releases/download/$ETCD_VER/etcd-$ETCD_VER-linux-amd64.tar.gz"
+          "https://github.com/kubernetes-sigs/cri-tools/releases/download/$CRIT_VER/crictl-$CRIT_VER-linux-amd64.tar.gz"
+          "https://github.com/opencontainers/runc/releases/download/$RUNC_VER/runc.amd64"
+          "https://github.com/containerd/containerd/releases/download/v$CNTD_VER/containerd-$CNTD_VER-linux-amd64.tar.gz"
+      )
+      
+      # Download files to the temporary directory
+      for url in "${URLS[@]}"; do
+          wget -P "$TEMP_DIR" -q --show-progress --https-only --timestamping "$url"
+      done
+      
+      chmod -R +x $TEMP_DIR/
+      
+      # Extract tar.gz files
+      tar -xzf $TEMP_DIR/etcd-$ETCD_VER-linux-amd64.tar.gz -C $TEMP_DIR
+      tar -xzf $TEMP_DIR/crictl-$CRIT_VER-linux-amd64.tar.gz -C $TEMP_DIR
+      tar -xzf $TEMP_DIR/containerd-$CNTD_VER-linux-amd64.tar.gz -C $TEMP_DIR
+      
+      # Copy files to /usr/local/bin
+      cp $TEMP_DIR/{kubectl,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,runc.amd64} /usr/local/bin/
+      cp $TEMP_DIR/etcd-$ETCD_VER-linux-amd64/{etcd,etcdctl} /usr/local/bin/
+      cp $TEMP_DIR/crictl /usr/local/bin/
+      cp $TEMP_DIR/bin/* /usr/local/bin/
+      
+      # Cleanup
+      rm -rf $TEMP_DIR
+
+  - path: /etc/sysctl.d/k8s.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+
+  - path: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+runcmd:
+  - /usr/local/bin/setup.sh
