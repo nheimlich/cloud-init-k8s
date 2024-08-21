@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
 network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
+kubernetes_version="v1.29.5"
 
 command -v triton >/dev/null 2>&1 && command -v fzf >/dev/null 2>&1 || {
 	echo >&2 "I require both the triton cli and fzf before running."
@@ -15,16 +16,17 @@ usage() {
 
 ctr() {
 	local output=""
+  # local parse_instance_shortid=$(grep -Eo '[a-f0-9]{8}\-[a-f0-9]{4}\-[a-f0-9]{4}\-[a-f0-9]{4}\-[a-f0-9]{12}' | head -n 1 | cut -d'-' -f1)
 
 	echo "creating control plane members:"
 
 	# initial control plane member to handle joins
-	triton inst create -n {{shortId}}$name_modifier $image $ctr_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services="ctr,init" -m "account=$account" -m "tag=init" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk"
+	triton inst create -n {{shortId}}$name_modifier $image $ctr_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services="ctr,init" -m "k8ver=$kubernetes_version" -m "account=$account" -m "tag=init" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk"
 
 	num_ctr=$((num_ctr - 1))
 
 	for i in $(seq 1 $num_ctr); do
-		output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services=ctr -m "account=$account" -m "tag=ctr" &)
+		output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services=ctr -m "k8ver=$kubernetes_version" -m "account=$account" -m "tag=ctr" &)
 		output+="\n"
 	done
 	wait
@@ -38,7 +40,7 @@ wrk() {
 	echo "creating data plane members:"
 
 	for i in $(seq 1 $num_wrk); do
-		output+=$(triton inst create -n {{shortId}}$name_modifier $image $wrk_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services=wrk -m "account=$account" -m "tag=wrk" --nic ipv4_uuid="$network" &)
+		output+=$(triton inst create -n {{shortId}}$name_modifier $image $wrk_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services=wrk -m "k8ver=$kubernetes_version" -m "account=$account" -m "tag=wrk" --nic ipv4_uuid="$network" &)
 		output+="\n"
 	done
 	wait
@@ -61,7 +63,7 @@ rm_cluster() {
 
 	if [ -n "$instances" ]; then
 		echo "$instances" | xargs -I {} triton inst rm -f {}
-		echo "Deleted instances:"
+		echo "\nDeleted instances:"
 		echo "$instances"
 	else
 		echo "No instances to delete"
