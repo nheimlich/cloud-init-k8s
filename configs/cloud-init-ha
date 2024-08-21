@@ -36,6 +36,7 @@ write_files:
       crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock
       systemctl restart containerd
 
+      export k8ver=$(mdata-get k8ver)
       case $(mdata-get tag) in
         init) /usr/local/bin/kubeadm-0.sh;;
         ctr) /usr/local/bin/kubeadm-ctr.sh;;
@@ -52,7 +53,7 @@ write_files:
       apt-get install busybox -y
       mkdir -p /var/k8s/
 
-      kubeadm init --upload-certs --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans ctr.svc.$(mdata-get account).us-central-1.triton.zone --control-plane-endpoint ctr.svc.$(mdata-get account).us-central-1.cns.mnx.io
+      kubeadm init --upload-certs --kubernetes-version $k8ver --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans ctr.svc.$(mdata-get account).us-central-1.triton.zone --control-plane-endpoint ctr.svc.$(mdata-get account).us-central-1.cns.mnx.io
 
       echo $(kubeadm token create --print-join-command) --control-plane --certificate-key $(kubeadm init phase upload-certs --upload-certs | grep -vw -e certificate -e Namespace) > /var/k8s/join-ctr.sh
 
@@ -102,7 +103,7 @@ write_files:
       set -e
       set -x
 
-      kubeadm config images pull --kubernetes-version v1.29.7
+      kubeadm config images pull --kubernetes-version $k8ver
 
       export ACCT=$(mdata-get account)
       export SRC=init.svc.$ACCT.us-central-1.cns.mnx.io
@@ -118,7 +119,7 @@ write_files:
       set -e
       set -x
       
-      kubeadm config images pull --kubernetes-version v1.29.7
+      kubeadm config images pull --kubernetes-version $k8ver
 
       export ACCT=$(mdata-get account)
       export SRC=init.svc.$ACCT.us-central-1.cns.mnx.io
