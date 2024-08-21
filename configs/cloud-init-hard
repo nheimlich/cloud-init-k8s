@@ -6,13 +6,11 @@ write_files:
   - path: /usr/local/bin/setup.sh
     permissions: '0755'
     content: |
-      #!/bin/bash
+      #!/usr/bin/env bash
       set -e
       set -x
 
       DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y wget ca-certificates curl gnupg apt-transport-https
-
-      /usr/local/bin/binaries.sh
 
       modprobe overlay
       modprobe br_netfilter
@@ -24,16 +22,19 @@ write_files:
       rm -f /etc/containerd/config.toml
       containerd config default | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
 
-      wget -P "/etc/systemd/system/" -q --show-progress --https-only --timestamping https://raw.githubusercontent.com/containerd/containerd/main/containerd.service
-      systemctl daemon-reload
-      systemctl enable --now containerd
+      wget -P "/lib/systemd/system/" -q --show-progress --https-only --timestamping https://raw.githubusercontent.com/containerd/containerd/main/containerd.service
+      systemctl daemon-reload && systemctl enable --now containerd
       crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock
       systemctl restart containerd
+
+      /usr/local/bin/pki.sh
+      /usr/local/bin/binaries.sh
+      /usr/local/bin/services.sh
 
   - path: /usr/local/bin/binaries.sh
     permissions: '0755'
     content: |
-      #!/bin/bash
+      #!/usr/bin/env bash
 
       KUBE_VER="v1.23.0"
       ETCD_VER="v3.5.0"
@@ -74,6 +75,43 @@ write_files:
       cp $TEMP_DIR/bin/* /usr/local/bin/
       
       # Cleanup
+      rm -rf $TEMP_DIR
+
+  - path: /usr/local/bin/services.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+
+      INTERNAL_IP=$(hostname -I | awk '{print $2}')
+      ETCD_NAME=$(hostname -s)
+      ETCD1=$(mdata-get etcd1)
+      ETCD2=$(mdata-get etcd2)
+      ETCD3=$(mdata-get etcd3)
+      ETCD_CRT_DIR="/etc/etcd/"
+      TEMP_DIR=$(mktemp -d)
+
+      URLS=(
+         "https://raw.githubusercontent.com/nheimlich/cloud-init-k8s/kubernetes-the-hard-way-cloud-init/configs/services/etcd.service"
+         "https://raw.githubusercontent.com/nheimlich/cloud-init-k8s/kubernetes-the-hard-way-cloud-init/configs/services/kube-api.service"
+         "https://raw.githubusercontent.com/nheimlich/cloud-init-k8s/kubernetes-the-hard-way-cloud-init/configs/services/kube-controller-manager.service"
+         "https://raw.githubusercontent.com/nheimlich/cloud-init-k8s/kubernetes-the-hard-way-cloud-init/configs/services/kube-scheduler.service"
+         "https://raw.githubusercontent.com/nheimlich/cloud-init-k8s/kubernetes-the-hard-way-cloud-init/configs/services/kubelet.service"
+      )
+
+      # etcd multi-cluster
+      sed -i -e s/INTERNAL_IP/$INTERNAL_IP/g \
+             -e s/ETCD_NAME/$ETCD_NAME/     \
+             -e s/ETCD1/$ETCD1/    \
+             -e s/ETCD2/$ETCD2/    \
+             -e s/ETCD3/$ETCD3/    \
+             -e s/\/etc\/etcd\//$ETCD_CRT_DIR/g
+             $TEMP_DIR/etcd.service
+
+      cp $TEMP_DIR/* /lib/systemd/system/
+
+      systemctl daemon-reload
+      systemctl enable --now etcd.service kube-api.service kube-controller-manager.service kube-scheduler.service kubelet.service
+
       rm -rf $TEMP_DIR
 
   - path: /etc/sysctl.d/k8s.conf
