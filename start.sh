@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
 network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
-kubernetes_version="v1.29.5"
+kubernetes_version="1.29.5"
+cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
+prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 
 command -v triton >/dev/null 2>&1 && command -v fzf >/dev/null 2>&1 || {
 	echo >&2 "I require both the triton cli and fzf before running."
@@ -9,24 +12,33 @@ command -v triton >/dev/null 2>&1 && command -v fzf >/dev/null 2>&1 || {
 }
 
 usage() {
-	echo "Usage: $0 <action> "
-	echo "  <action> - 'up' or 'down'"
+	echo "Usage: $0 <action> [OPTIONS]"
+	echo "<action> - 'up' or 'down'"
 	exit 1
+}
+
+suffix() {
+	echo "For an instance suffix, please type it now (Example: {{shortId}}.suffix), or press enter to skip:"
+	read -r suffix
+
+	if [ -z $suffix ]; then
+		echo "Defaulting to no suffix..."
+		name_modifier=""
+	else
+		name_modifier=".$suffix"
+	fi
 }
 
 ctr() {
 	local output=""
-  # local parse_instance_shortid=$(grep -Eo '[a-f0-9]{8}\-[a-f0-9]{4}\-[a-f0-9]{4}\-[a-f0-9]{4}\-[a-f0-9]{12}' | head -n 1 | cut -d'-' -f1)
+	echo "creating control-plane members:"
 
-	echo "creating control plane members:"
-
-	# initial control plane member to handle joins
-	triton inst create -n {{shortId}}$name_modifier $image $ctr_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services="ctr,init" -m "k8ver=$kubernetes_version" -m "account=$account" -m "tag=init" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk"
+  triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init"
 
 	num_ctr=$((num_ctr - 1))
 
 	for i in $(seq 1 $num_ctr); do
-		output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services=ctr -m "k8ver=$kubernetes_version" -m "account=$account" -m "tag=ctr" &)
+		output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr" &)
 		output+="\n"
 	done
 	wait
@@ -40,7 +52,7 @@ wrk() {
 	echo "creating data plane members:"
 
 	for i in $(seq 1 $num_wrk); do
-		output+=$(triton inst create -n {{shortId}}$name_modifier $image $wrk_package -b bhyve --cloud-config configs/cloud-init-ha -t triton.cns.services=wrk -m "k8ver=$kubernetes_version" -m "account=$account" -m "tag=wrk" --nic ipv4_uuid="$network" &)
+		output+=$(triton inst create -n {{shortId}}$name_modifier $image $wrk_package $prd_params -m tag="wrk" --nic ipv4_uuid="$network" &)
 		output+="\n"
 	done
 	wait
@@ -49,37 +61,26 @@ wrk() {
 }
 
 rm_cluster() {
-  #multi-select(triton inst ls | fzf --header='Press TAB or SHIFT + TAB to Select Mulitple, CTRL-c or ESC to quit' --layout=reverse-list --multi)
-	echo "If you have an instance suffix, please type it now (Example: {{shortId}}.suffix), or press enter to skip:"
-	read -r suffix
-	if [ -z $suffix ]; then
-		echo "Invalid input. Defaulting to no suffix."
-		name_modifier=""
-	else
-		name_modifier=".$suffix"
-	fi
-
+  suffix
 	local instances=$(triton inst ls -Ho name | grep -E "^[a-f0-9]{8}${name_modifier}$")
 
 	if [ -n "$instances" ]; then
+    echo -e "\nDeleted Instances:"
 		echo "$instances" | xargs -I {} triton inst rm -f {}
-		echo "\nDeleted instances:"
-		echo "$instances"
 	else
 		echo "No instances to delete"
 	fi
 }
 
 dev_env() {
-
 	echo "Select a package size for your instance:"
 	read -p "Press enter to continue"
+
 	dev_package=$(triton package ls | fzf --header='CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
 	echo "Creating single control plane:"
 
-	triton inst create -n "{{shortId}}$name_modifier" $image $dev_package -b bhyve \
-		--cloud-config "configs/cloud-init" -t "triton.cns.services=dev" -m "account=$account"
+	triton inst create -n "{{shortId}}$name_modifier" $image $dev_package $dev_params -m tag=dev -t triton.cns.services=dev-$cluster_id
 }
 
 prd_env() {
@@ -99,46 +100,20 @@ prd_env() {
 	echo "How many data plane members would you like to create? (Choose 1-99)"
 	read -p "Enter number of members: " num_wrk
 
-	echo "Please select a package size for your control-plane instances:"
-	read -p "Press enter to continue"
-	ctr_package=$(triton package ls | fzf --header='CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
-
-	echo "Please select a package size for your data-plane instances:"
-	read -p "Press enter to continue"
-	wrk_package=$(triton package ls | fzf --header='CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
-
+	ctr_package=$(triton package ls | fzf --header='please select a package size for your control-plane instances. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+	wrk_package=$(triton package ls | fzf --header='please select a package size for your data-plane instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
 
 	ctr
 	wrk
-
 }
 
 main() {
+  suffix
 
-	echo "Would you like a instance name suffix? (Y/N) (Example: N = {{shortId}} or Y = {{shortId}}.suffix)"
-	read -r suffix
-
-	case "$suffix" in
-	"Y" | "y")
-		echo "What would you like your suffix to be?"
-		read name_modifier
-		name_modifier=".$name_modifier"
-		;;
-	"N" | "n")
-		name_modifier=""
-		;;
-	*)
-		echo "Invalid input. Defaulting to no suffix."
-		name_modifier=""
-		;;
-	esac
-
-	echo "Would you like a Development (1) or Production (HA) environment? (dev/prod)"
+	echo "Would you like a Development or Production environment? (dev/prod)"
 	read -r environment
 
-	echo "Please select a image for your kubernetes environment:"
-	read -p "Press enter to continue"
-	image=$(triton image ls type=zvol os=linux| fzf --header='CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
 	case "$environment" in
 	"prod") prd_env ;;
