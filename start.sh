@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
 network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
-kubernetes_version="1.29.5"
+kubernetes_version="1.29.8"
 cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
 prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
@@ -31,11 +31,12 @@ suffix() {
 
 ctr() {
 	local output=""
-	echo "creating control-plane members:"
+  echo "creating control-plane members:"
 
-  triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init"
+  output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init" &)
+  output+="\n"
 
-	num_ctr=$((num_ctr - 1))
+  num_ctr=$((num_ctr - 1))
 
 	for i in $(seq 1 $num_ctr); do
 		output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr" &)
