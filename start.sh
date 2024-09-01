@@ -31,12 +31,12 @@ suffix() {
 
 ctr() {
 	local output=""
-  echo "creating control-plane members:"
+	echo "creating control-plane members:"
 
-  output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init" &)
-  output+="\n"
+	output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init" &)
+	output+="\n"
 
-  num_ctr=$((num_ctr - 1))
+	num_ctr=$((num_ctr - 1))
 
 	for i in $(seq 1 $num_ctr); do
 		output+=$(triton inst create -n {{shortId}}$name_modifier $image $ctr_package $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr" &)
@@ -62,11 +62,11 @@ wrk() {
 }
 
 rm_cluster() {
-  suffix
+	suffix
 	local instances=$(triton inst ls -Ho name | grep -E "^[a-f0-9]{8}${name_modifier}$")
 
 	if [ -n "$instances" ]; then
-    echo -e "\nDeleted Instances:"
+		echo -e "\nDeleted Instances:"
 		echo "$instances" | xargs -I {} triton inst rm -f {}
 	else
 		echo "No instances to delete"
@@ -88,8 +88,8 @@ prd_env() {
 	local choice=false
 
 	while [ "$choice" = false ]; do
-	  echo "How many control plane members would you like to create? (Choose 3, 5, 7, or 9)"
-	  read -p "Enter number of members: " num_ctr
+		echo "How many control plane members would you like to create? (Choose 3, 5, 7, or 9)"
+		read -p "Enter number of members: " num_ctr
 
 		if [[ "$num_ctr" == "3" || "$num_ctr" == "5" || "$num_ctr" == "7" || "$num_ctr" == "9" ]]; then
 			choice=true
@@ -109,7 +109,7 @@ prd_env() {
 }
 
 main() {
-  suffix
+	suffix
 
 	echo "Would you like a Development or Production environment? (dev/prod)"
 	read -r environment
@@ -131,8 +131,8 @@ if [ "$#" -ne 1 ]; then
 fi
 
 case "$ACTION" in
-"up") main;;
-"down") rm_cluster;;
-"upgrade") echo "Not added yet";;
+"up") main ;;
+"down") rm_cluster ;;
+"upgrade") echo "Not added yet" ;;
 *) echo "Invalid action. Use 'up' or 'down'" usage ;;
 esac
