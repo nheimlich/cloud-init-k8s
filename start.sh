@@ -61,18 +61,6 @@ wrk() {
 	echo -e "$output"
 }
 
-rm_cluster() {
-	suffix
-	local instances=$(triton inst ls -Ho name | grep -E "^[a-f0-9]{8}${name_modifier}$")
-
-	if [ -n "$instances" ]; then
-		echo -e "\nDeleted Instances:"
-		echo "$instances" | xargs -I {} triton inst rm -f {}
-	else
-		echo "No instances to delete"
-	fi
-}
-
 dev_env() {
 	echo "Select a package size for your instance:"
 	read -p "Press enter to continue"
@@ -108,6 +96,27 @@ prd_env() {
 	wrk
 }
 
+ls_cluster() {
+	clusterids=""
+	clusterids=$(triton inst ls -Hoshortid tag.cluster="*" | while read -r id; do triton inst tag get "$id" cluster; done | sort | uniq)
+	for i in $clusterids; do echo -e "cluster-id: $i\ninstances:" && triton inst ls -H tag.cluster="$i"; done
+}
+
+rm_cluster() {
+	echo -e "current clusters:\n"
+	ls_cluster
+
+	read -p "Enter the Cluster-ID you'd like to delete: " cluster_id
+	instances=$(triton inst ls -Hoshortid tag.cluster="$cluster_id")
+
+	if [ -n "$instances" ]; then
+		echo -e "\nDeleted Instances:"
+		echo "$instances" | xargs -I {} triton inst rm -f {}
+	else
+		echo "No instances to delete"
+	fi
+}
+
 main() {
 	suffix
 
@@ -133,6 +142,7 @@ fi
 case "$ACTION" in
 "up") main ;;
 "down") rm_cluster ;;
+"show_clusters") ls_cluster ;;
 "upgrade") echo "Not added yet" ;;
 *) echo "Invalid action. Use 'up' or 'down'" usage ;;
 esac
