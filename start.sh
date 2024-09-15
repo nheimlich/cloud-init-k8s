@@ -22,35 +22,27 @@ suffix() {
 }
 
 ctr() {
-	output=""
 	echo "creating control-plane members:"
 
-	output+=$(triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init" &)
-	output+="\n"
+	triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init"
 
 	num_ctr=$((num_ctr - 1))
 
 	for i in $(seq 1 "$num_ctr"); do
-		output+=$(triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr" &)
-		output+="\n"
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr"
 	done
 	wait
 
-	printf "%s" "$output"
 }
 
 wrk() {
-	output=""
-
 	echo "creating data plane members:"
 
 	for i in $(seq 1 "$num_wrk"); do
-		output+=$(triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -m tag="wrk" --nic ipv4_uuid="$network" &)
-		output+="\n"
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -m tag="wrk" --nic ipv4_uuid="$network"
 	done
 	wait
 
-	printf "%s" "$output"
 }
 
 dev_env() {
@@ -98,7 +90,7 @@ ls_cluster() {
 		echo "no clusters available"
 		exit 1
 	else
-		printf "current clusters:"
+		printf "current clusters:\n"
 	fi
 	for i in $clusterids; do printf "cluster-id: %s\ninstances:\n" "$i" && triton inst ls -H tag.cluster="$i"; done
 }
