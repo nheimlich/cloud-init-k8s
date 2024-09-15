@@ -94,11 +94,17 @@ prd_env() {
 ls_cluster() {
 	clusterids=""
 	clusterids=$(triton inst ls -Hoshortid tag.cluster="*" | while read -r id; do triton inst tag get "$id" cluster; done | sort | uniq | grep -Ev "^0$")
+	if [ -z "$clusterids" ]; then
+		echo "no clusters available"
+		exit 1
+	else
+		printf "current clusters:"
+	fi
 	for i in $clusterids; do printf "cluster-id: %s\ninstances:\n" "$i" && triton inst ls -H tag.cluster="$i"; done
 }
 
 rm_cluster() {
-	printf "current clusters:\n"
+	printf "checking for existing clusters..\n"
 	ls_cluster
 
 	printf "Enter the Cluster-ID you'd like to delete: "
