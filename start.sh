@@ -119,7 +119,6 @@ grab_kubeconfig() {
 	read -r cluster_id
 
 	triton inst metadata get $(triton inst ls -Hoshortid tag.triton.cns.services="init-$cluster_id,ctr-$cluster_id") admin.conf
-
 }
 
 main() {
@@ -137,6 +136,7 @@ main() {
 
 	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
+	#triton image ls -Honame,version,os,pubdate,shortid type=zvol os=linux | sort -k1,1 -k2,2r | awk '!seen[$1]++' | nl -w1 | sed '7q;d' | awk '{print $6}'
 	case "$environment" in
 	"prod") prd_env ;;
 	"dev") dev_env ;;
