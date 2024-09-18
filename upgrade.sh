@@ -1,32 +1,32 @@
 #!/usr/bin/env sh
-set -x
-kubeadm_version=$(kubeadm version --output=short | sed 's/v//')
-apt_version=$(apt-cache policy kubeadm | grep -i 'candidate' | awk '{print $2}' | sed 's/\-.\.1//')
 
-command -v etcdctl >/dev/null 2>&1 || echo >&2 "I require the etcd cli before running" && apt-get install -y etcd-client
-
-INIT_CTR="$(ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/peer.crt --key=/etc/kubernetes/pki/etcd/peer.key member list | head -n1 | awk '{print $3}' | cut -d, -f1)"
-CTR_HOSTNAME="$(hostname)"
+_pre() {
+	test -r /etc/kubernetes/pki/etcd/ca.crt || sudo command -v etcdctl >/dev/null 2>&1 || apt-get install -y etcd-client
+}
 
 kube_ver() {
+	kubeadm_version=$(sudo kubeadm version --output=short | sed 's/v//')
 	IFS='.'
 	set -- $kubeadm_version
 	kube_ver_1=$1
 	kube_ver_2=$2
 	kube_ver_3=$3
-
-	printf "kubeadm version:\n"
-	printf "major ver: $kube_ver_1\n"
-	printf "minor ver: $kube_ver_2\n"
-	printf "patch ver: $kube_ver_3\n"
 }
 
 apt_ver() {
+	export apt_version=$(sudo apt-cache policy kubeadm | grep -i 'candidate' | awk '{print $2}' | sed 's/\-.\.1//')
 	IFS='.'
 	set -- $apt_version
 	apt_ver_1=$1
 	apt_ver_2=$2
 	apt_ver_3=$3
+}
+
+print_ver() {
+	printf "kubeadm version:\n"
+	printf "major ver: $kube_ver_1\n"
+	printf "minor ver: $kube_ver_2\n"
+	printf "patch ver: $kube_ver_3\n"
 
 	printf "apt version:\n"
 	printf "major ver: $apt_ver_1\n"
@@ -34,51 +34,67 @@ apt_ver() {
 	printf "patch ver: $apt_ver_3\n"
 }
 
-kube_ver
-apt_ver
-
 version_check() {
+	kube_ver
+	apt_ver
 	if [ "$apt_ver_1" -gt "$kube_ver_1" ]; then
 		exit 1
-	elif [ "$apt_ver_1" -eq "$kube_ver_1" ]; then
-		continue
+	elif [ "$apt_ver_1" -ne "$kube_ver_1" ]; then
+		printf "Major Version Changed from $kube_ver_1 to $apt_ver_1, please upgrade manually\n" &&
+			exit 1
+	elif [ "$apt_ver_2" -gt "$kube_ver_2" ]; then
+		printf "Minor Version Changed from $kube_ver_2 to $apt_ver_2\n" &&
+			printf "This upgrade path hasn't been implemented yet" && exit 1
+	elif [ "$apt_ver_3" -gt "$kube_ver_3" ]; then
+		printf "Patch Version Changed from $kube_ver_3 to $apt_ver_3, proceeding..\n"
+	fi
+}
+
+minor_upgrade() {
+	sudo current_version=$(kubeadm version --output=short | sed 's/v//')
+	sudo echo "New Minor Release Selected"
+	sudo cp -f /etc/apt/sources.list.d/kubernetes.list /etc/apt/sources.list.d/.kubernetes.list.bak
+	sudo sed -i "s/v$current_version/v$selected_version/" /etc/apt/sources.list.d/kubernetes.list
+}
+
+upgrade() {
+	INIT_CTR=""
+	test -r /etc/kubernetes/pki/etcd/ca.crt || export INIT_CTR="$(ETCDCTL_API=3 sudo etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/peer.crt --key=/etc/kubernetes/pki/etcd/peer.key member list | head -n1 | awk '{print $3}' | cut -d, -f1)"
+
+	sudo apt-get update
+	sudo apt-mark unhold kubeadm
+	sudo apt-get -y upgrade kubeadm
+
+	export CTR_HOSTNAME="$(hostname)"
+
+	if [ "$INIT_CTR" = "$CTR_HOSTNAME" ]; then
+		export ADM_VERSION=$(kubeadm version --output=short)
+		kubeadm upgrade plan
+		kubeadm upgrade apply "$ADM_VERSION" -y
+	else
+		kubeadm upgrade node
 	fi
 
-	if [ "$apt_ver_2" -gt "$kube_ver_2" ] || [ "$apt_ver_3" -gt "$kube_ver_3" ]; then
-		echo "Minor/Patch Version Changed, intervention needed." && upgrade_node
-	fi
+	sudo apt-mark unhold kubelet kubectl
+	sudo apt-get -y upgrade kubelet kubectl
+	sudo apt-mark hold kubeadm kubelet kubectl
+	sudo systemctl restart kubelet
 }
 
-upgrade_ctr() {
-	KUBEADM_VERSION=$(kubeadm version --output=short)
-	apt-mark unhold kubeadm
-	apt-get -y upgrade kubeadm
+main() {
+	_pre
+	version_check
 
-	kubeadm upgrade apply $KUBEADM_VERSION -y
-	apt-mark unhold kubelet kubectl
-	apt-get -y upgrade kubelet kubectl
+	printf "this utility will upgrade kubernetes from the $kubeadm_version to $apt_version\n"
+	printf "please ensure $INIT_CTR is upgraded before continuing\n"
+	printf "would you like to continue?"
 
-	apt-mark hold kubeadm kubelet kubectl
-
-	systemctl restart kubelet
+	read -r prompt
+	case $prompt in
+	"y" | "Y") version_check && upgrade_node ;;
+	"n" | "N") exit 1 ;;
+	*) exit 1 ;;
+	esac
 }
 
-upgrade_node() {
-	KUBEADM_VERSION=$(kubeadm version --output=short)
-	apt-mark unhold kubeadm
-	apt-get -y upgrade kubeadm
-
-	kubeadm upgrade node
-	apt-mark unhold kubelet kubectl
-	apt-get -y upgrade kubelet kubectl
-
-	apt-mark hold kubeadm kubelet kubectl
-
-	systemctl restart kubelet
-}
-
-if [ "$INIT_CTR" = "$CTR_HOSTNAME" ]; then
-	upgrade_ctr
-else
-	upgrade_node
-fi
+main
