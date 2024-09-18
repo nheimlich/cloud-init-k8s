@@ -118,7 +118,7 @@ grab_kubeconfig() {
 	printf "Enter the Cluster-ID you'd like to grab your kubeconfig from: "
 	read -r cluster_id
 
-	triton inst metadata get $(triton inst ls -Hoshortid tag.triton.cns.services="init-$cluster_id,ctr-$cluster_id") admin.conf
+	triton inst metadata get "$(triton inst ls -Hoshortid tag.triton.cns.services="init-$cluster_id,ctr-$cluster_id")" admin.conf
 }
 
 main() {
