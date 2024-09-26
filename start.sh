@@ -43,7 +43,7 @@ wrk() {
 	echo "creating data plane members:"
 
 	for i in $(seq 1 "$num_wrk"); do
-		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -m tag="wrk" --nic ipv4_uuid="$network"
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -m tag="wrk" --nic ipv4_uuid="$network"
 	done
 	wait
 
@@ -97,7 +97,8 @@ ls_cluster() {
 		for cluster in $clusterids; do
 			printf '%s\n' '-----------------------'
 			printf "cluster: %s\ninstances:\n" "$cluster"
-			printf "  - %s\n" $(triton inst ls -Honame tag.cluster="$cluster")
+			printf "  - (control-plane) %s\n" $(triton inst ls -Honame tag.triton.cns.services="*ctr-$cluster")
+			printf "  - (data-plane) %s\n" $(triton inst ls -Honame tag.triton.cns.services="wrk-$cluster")
 		done
 	fi
 }
