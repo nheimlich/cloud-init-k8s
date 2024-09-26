@@ -112,7 +112,6 @@ rm_cluster() {
 }
 
 grab_kubeconfig() {
-	printf "current clusters:\n"
 	ls_cluster
 
 	printf "Enter the Cluster-ID you'd like to grab your kubeconfig from: "
