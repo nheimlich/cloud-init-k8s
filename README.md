@@ -17,6 +17,10 @@
 ❯ ./start.sh ls
 current clusters:
 -----------------------
+cluster: 059b69b4
+instances:
+  - (standalone) ed205fa5.nhlabs.test
+-----------------------
 cluster: ae78e3f9
 instances:
   - (control-plane) 1862a334.nhlabs.org

@@ -95,10 +95,19 @@ ls_cluster() {
 	else
 		printf "current clusters:\n"
 		for cluster in $clusterids; do
+			control_plane=$(triton inst ls -Honame tag.triton.cns.services="*ctr-$cluster")
+			data_plane=$(triton inst ls -Honame tag.triton.cns.services="wrk-$cluster")
+			standalone=$(triton inst ls -Honame tag.triton.cns.services="dev-$cluster")
 			printf '%s\n' '-----------------------'
 			printf "cluster: %s\ninstances:\n" "$cluster"
-			printf "  - (control-plane) %s\n" $(triton inst ls -Honame tag.triton.cns.services="*ctr-$cluster")
-			printf "  - (data-plane) %s\n" $(triton inst ls -Honame tag.triton.cns.services="wrk-$cluster")
+			if [ -n "$control_plane" ] || [ -n "$data_plane" ]; then
+				for i in $control_plane; do printf "  - (control-plane) %s\n" $i; done
+				for i in $data_plane; do printf "  - (data-plane) %s\n" $i; done
+			elif [ -n "$standalone" ]; then
+				printf "  - (standalone) %s\n" "$standalone"
+			else
+				printf "  - no instances found for cluster %s\n" "$cluster"
+			fi
 		done
 	fi
 }
