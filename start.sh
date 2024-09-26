@@ -5,7 +5,11 @@ command -v fzf >/dev/null 2>&1 || echo >&2 "I require the fzf cli before running
 
 usage() {
 	echo "Usage: $0 <action> [OPTIONS]"
-	echo "<action> - 'up' or 'down'"
+	echo "<action> = 'up' or 'down' or 'ls' or 'kubeconfig'"
+	echo " up     -- create kubernetes cluster"
+	echo " down   -- destroy a kubernetes cluster"
+	echo " ls     -- show existing clusters"
+	echo " config -- get kubeconfig from an existing cluster"
 	exit 1
 }
 
@@ -84,15 +88,18 @@ prd_env() {
 }
 
 ls_cluster() {
-	clusterids=""
 	clusterids=$(triton inst ls -Hoshortid tag.cluster="*" | while read -r id; do triton inst tag get "$id" cluster; done | sort | uniq | grep -Ev "^0$")
 	if [ -z "$clusterids" ]; then
 		echo "no clusters available"
 		exit 1
 	else
 		printf "current clusters:\n"
+		for cluster in $clusterids; do
+			printf '%s\n' '-----------------------'
+			printf "cluster: %s\ninstances:\n" "$cluster"
+			printf "  - %s\n" $(triton inst ls -Honame tag.cluster="$cluster")
+		done
 	fi
-	for i in $clusterids; do printf "cluster-id: %s\ninstances:\n" "$i" && triton inst ls -H tag.cluster="$i"; done
 }
 
 rm_cluster() {
@@ -153,8 +160,8 @@ fi
 case "$ACTION" in
 "up") main ;;
 "down") rm_cluster ;;
-"show_clusters") ls_cluster ;;
-"kubeconfig") grab_kubeconfig ;;
+"ls") ls_cluster ;;
+"config") grab_kubeconfig ;;
 "upgrade") echo "Not added yet" ;;
 *) echo "Invalid action. Use 'up' or 'down'" usage ;;
 esac
