@@ -88,7 +88,7 @@ prd_env() {
 }
 
 ls_cluster() {
-	clusterids=$(triton inst ls -Hoshortid tag.cluster="*" | while read -r id; do triton inst tag get "$id" cluster; done | sort | uniq | grep -Ev "^0$")
+	clusterids=$(triton inst ls --json | grep -Eo '\"cluster\"\:\"[a-z0-9]{8}\"' | sed 's/"cluster":"\([a-z0-9]\{8\}\)"/\1/' | sort -u)
 	if [ -z "$clusterids" ]; then
 		echo "no clusters available"
 		exit 1
