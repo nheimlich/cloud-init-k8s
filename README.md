@@ -14,7 +14,7 @@
 #### listing out instances per available cluster
 
 ```
-❯ ./start.sh ls
+❯ ./tk8s.sh ls
 current clusters:
 -----------------------
 cluster: 059b69b4
@@ -36,7 +36,7 @@ instances:
 #### grabbing admin kubeconfig from a Cluster
 
 ```
-> ./start.sh config
+> ./tk8s.sh config
 current clusters:
 -----------------------
 cluster: ae78e3f9
