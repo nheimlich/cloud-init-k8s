@@ -5,12 +5,30 @@ command -v fzf >/dev/null 2>&1 || echo >&2 "I require the fzf cli before running
 
 usage() {
 	echo "Usage: $0 <action> [OPTIONS]"
-	echo "<action> = 'up' or 'down' or 'ls' or 'kubeconfig'"
-	echo " up     -- create kubernetes cluster"
-	echo " down   -- destroy a kubernetes cluster"
-	echo " ls     -- show existing clusters"
-	echo " config -- get kubeconfig from an existing cluster"
+	echo " up      -- create kubernetes cluster"
+	echo " down    -- destroy a kubernetes cluster"
+	echo " ls      -- show existing clusters"
+	echo " config  -- get kubeconfig from an existing cluster"
+	echo " upgrade -- upgrade Clusters to a new version"
+	echo " bastion -- create a trk8s bastion host"
 	exit 1
+}
+
+bastion() {
+	printf "checking for an existing bastion host..\n"
+	bastion=$(triton inst ls -Honame tag.triton.cns.services="bastion")
+
+	if [ -n "$bastion" ]; then
+		printf "current bastion:"
+		printf "  - (bastion) %s\n" "$bastion" && exit 1
+	else
+		printf "no bastion found, creating one now..\n" && sleep 1
+	fi
+
+	bst_package=$(triton package ls | fzf --header='please select a package size for your bastion instance. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+	bst_image=$(triton image ls type=zone-dataset os=smartos name='base-64-lts' | sort -k2,2 -k3,3r | fzf --header='please select a image for your bastion-host. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+
+	triton inst create -n {{shortId}}-bastion "$bst_image" "$bst_package" -t triton.cns.services="bastion" -t role="bastion"
 }
 
 suffix() {
@@ -43,7 +61,7 @@ wrk() {
 	echo "creating data plane members:"
 
 	for i in $(seq 1 "$num_wrk"); do
-		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -m tag="wrk" --nic ipv4_uuid="$network"
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -t tritoncli.ssh.proxy="$(triton inst ls -Hoshortid tag.role=bastion)" -m tag="wrk" --nic ipv4_uuid="$network"
 	done
 	wait
 
@@ -172,6 +190,7 @@ case "$ACTION" in
 "down") rm_cluster ;;
 "ls") ls_cluster ;;
 "config") grab_kubeconfig ;;
-"upgrade") echo "Not added yet" ;;
-*) echo "Invalid action. Use 'up' or 'down'" usage ;;
+"upgrade") printf "not implemented yet\n" ;;
+"bastion") bastion ;;
+*) printf "invalid action.\n" usage ;;
 esac
