@@ -1,5 +1,10 @@
 ## CLOUD INIT K8s /w TRITON
 
+#### REQUIREMENTS:
+- Triton cli v7.17.0 or higher
+- fzf cli v0.55.0 or higher
+- Triton Container Naming Service should be enabled for your account.
+
 #### Goals:
 
 - Bootstrap a fully functional Kubernetes Cluster with Kubeadm using Triton & CNS
