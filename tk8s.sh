@@ -152,7 +152,17 @@ grab_kubeconfig() {
 	printf "Enter the Cluster-ID you'd like to grab your kubeconfig from: "
 	read -r cluster_id
 
-	triton inst metadata get "$(triton inst ls -Hoshortid tag.triton.cns.services="init-$cluster_id,ctr-$cluster_id")" admin.conf
+	prd=$(triton inst metadata get "$(triton inst ls -Hoshortid tag.triton.cns.services="init-$cluster_id,ctr-$cluster_id")" admin.conf 2>/dev/null)
+	dev=$(triton inst metadata get "$(triton inst ls -Hoshortid tag.triton.cns.services="dev-$cluster_id")" admin.conf 2>/dev/null)
+
+	if [ -z "$prd" ] && [ -z "$dev" ]; then
+		printf "no kubeconfig was found for clusterid: %s\n" "$cluster_id" && exit 1
+	elif [ -z "$prd" ]; then
+		printf "%s" "$dev"
+	else
+		[ -z "$dev" ]
+		printf "%s" "$prd"
+	fi
 }
 
 main() {
