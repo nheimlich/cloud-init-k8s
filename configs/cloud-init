@@ -14,11 +14,11 @@ write_files:
 
       apt-get update && apt-get install -y ca-certificates curl gnupg apt-transport-https
       install -m 0755 -d /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+      curl --retry 5 -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
       chmod a+r /etc/apt/keyrings/docker.asc
       
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-      curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      curl --retry 5 -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
       
       apt-get update && apt-get install containerd.io kubelet=$k8ver-1.1 kubeadm=$k8ver-1.1 kubectl=$k8ver-1.1 -y 
@@ -66,10 +66,10 @@ write_files:
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
 
-      CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+      CILIUM_CLI_VERSION=$(curl --retry 5 -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
       CLI_ARCH=amd64
 
-      curl -LO --fail https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
+      curl --retry 5 -LO --fail https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
       tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
 
       cilium install -f /root/cilium-config
@@ -104,10 +104,10 @@ write_files:
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
 
-      CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+      CILIUM_CLI_VERSION=$(curl --retry 5 -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
       CLI_ARCH=amd64
 
-      curl -LO --fail https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
+      curl --retry 5 -LO --fail https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
       tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
 
       cilium install -f /root/cilium-config
@@ -144,7 +144,7 @@ write_files:
 
       while [[ "$(curl -k -s -o /dev/null -w ''%{http_code}'' http://$SRC:8000/join-$TAG.sh)" != "200" ]]; do sleep 2; done
 
-      curl -s http://$SRC:8000/join-$TAG.sh | bash
+      curl --retry 5 -s http://$SRC:8000/join-$TAG.sh | bash
 
   - path: /etc/modules-load.d/k8s.conf
     content: |
