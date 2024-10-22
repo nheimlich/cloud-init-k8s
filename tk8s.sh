@@ -106,6 +106,7 @@ prd_env() {
 }
 
 ls_cluster() {
+	printf "checking for existing clusters..\n"
 	clusterids=$(triton inst ls --json | grep -Eo '\"cluster\"\:\"[a-z0-9]{8}\"' | sed 's/"cluster":"\([a-z0-9]\{8\}\)"/\1/' | sort -u)
 	if [ -z "$clusterids" ]; then
 		echo "no clusters available"
@@ -131,7 +132,6 @@ ls_cluster() {
 }
 
 rm_cluster() {
-	printf "checking for existing clusters..\n"
 	ls_cluster
 
 	printf "Enter the Cluster-ID you'd like to delete: "
