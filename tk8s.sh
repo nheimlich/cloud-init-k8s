@@ -11,6 +11,7 @@ usage() {
 	echo " config  -- get kubeconfig from an existing cluster"
 	echo " upgrade -- upgrade Clusters to a new version"
 	echo " bastion -- create a trk8s bastion host"
+	echo " clb     -- create a load balancer service"
 	exit 1
 }
 
@@ -68,6 +69,8 @@ wrk() {
 }
 
 dev_env() {
+	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+
 	echo "Select a package size for your instance:"
 	printf "Press enter to continue"
 	read -r _
@@ -81,6 +84,8 @@ dev_env() {
 
 prd_env() {
 	choice=false
+
+	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
 	while [ "$choice" = false ]; do
 		echo "How many control plane members would you like to create? (Choose 3, 5, 7, or 9)"
@@ -165,20 +170,10 @@ grab_kubeconfig() {
 	fi
 }
 
-main() {
+interactive() {
 	suffix
-
-	account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
-	network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
-	kubernetes_version="1.29.8"
-	cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
-	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
-	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
-
 	echo "Would you like a Development or Production environment? (dev/prod)"
 	read -r environment
-
-	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
 	case "$environment" in
 	"prod") prd_env ;;
@@ -186,6 +181,34 @@ main() {
 	*) echo "Invalid Input, please select an environment" && exit 1 ;;
 	esac
 
+}
+
+cloud_load_balancer() {
+	ls_cluster
+	printf "Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:\n"
+	read -r cluster_id
+
+	clb_package=$(triton package ls | fzf --header='please select a package size for your cloud-load-balancer instance(s). CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+	clb_external=$(triton network ls | fzf --header='please select an external network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
+	clb_internal=$(triton network ls | fzf --header='please select an internal network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
+
+	for i in $(seq 1 $clb_num); do
+		triton inst create cloud-load-balancer $clb_package --name $cluster_id-clb --network $clb_external --network $clb_internal \
+			-m cloud.tritoncompute:loadbalancer=true -m cloud.tritoncompute:max_rs="64" \
+			-m cloud.tritoncompute:portmap="tcp://443:$cluster_cns:30443,tcp://443:$cluster_cns:30080" \
+			-t triton.cns.services="$cluster_id-clb"
+	done
+}
+
+main() {
+	account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
+	network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
+	kubernetes_version="1.29.8"
+	cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
+	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+
+	interactive
 }
 
 ACTION="$1"
@@ -201,5 +224,6 @@ case "$ACTION" in
 "config") grab_kubeconfig ;;
 "upgrade") printf "not implemented yet\n" ;;
 "bastion") bastion ;;
+"clb") cloud_load_balancer ;;
 *) printf "invalid action.\n" usage ;;
 esac
