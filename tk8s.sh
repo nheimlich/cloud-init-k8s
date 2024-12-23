@@ -11,6 +11,7 @@ usage() {
 	echo " config  -- get kubeconfig from an existing cluster"
 	echo " upgrade -- upgrade Clusters to a new version"
 	echo " bastion -- create a trk8s bastion host"
+	echo " clb     -- create a load balancer service"
 	exit 1
 }
 
@@ -68,6 +69,8 @@ wrk() {
 }
 
 dev_env() {
+	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+
 	echo "Select a package size for your instance:"
 	printf "Press enter to continue"
 	read -r _
@@ -81,6 +84,8 @@ dev_env() {
 
 prd_env() {
 	choice=false
+
+	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
 	while [ "$choice" = false ]; do
 		echo "How many control plane members would you like to create? (Choose 3, 5, 7, or 9)"
@@ -115,11 +120,15 @@ ls_cluster() {
 		printf "current clusters:\n"
 		for cluster in $clusterids; do
 			control_plane=$(triton inst ls -Honame tag.triton.cns.services="*ctr-$cluster")
+			load_balancer=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster")
 			data_plane=$(triton inst ls -Honame tag.triton.cns.services="wrk-$cluster")
 			standalone=$(triton inst ls -Honame tag.triton.cns.services="dev-$cluster")
 			printf '%s\n' '-----------------------'
 			printf "cluster: %s\ninstances:\n" "$cluster"
 			if [ -n "$control_plane" ] || [ -n "$data_plane" ]; then
+				if [ -n "$load_balancer" ]; then
+					for i in $load_balancer; do printf "  - (load-balancer) %s\n" $i; done
+				fi
 				for i in $control_plane; do printf "  - (control-plane) %s\n" $i; done
 				for i in $data_plane; do printf "  - (data-plane) %s\n" $i; done
 			elif [ -n "$standalone" ]; then
@@ -165,20 +174,10 @@ grab_kubeconfig() {
 	fi
 }
 
-main() {
+interactive() {
 	suffix
-
-	account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
-	network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
-	kubernetes_version="1.29.8"
-	cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
-	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
-	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
-
 	echo "Would you like a Development or Production environment? (dev/prod)"
 	read -r environment
-
-	image=$(triton image ls type=zvol os=linux | sort -k2,2 -k3,3r | awk '!seen[$2]++' | fzf --header='please select a image for your kubernetes environment. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 
 	case "$environment" in
 	"prod") prd_env ;;
@@ -186,6 +185,61 @@ main() {
 	*) echo "Invalid Input, please select an environment" && exit 1 ;;
 	esac
 
+}
+
+cloud_load_balancer() {
+	ls_cluster
+
+	fe_ctr=6443
+	be_ctr=6443
+	fe_app=80
+	fe_ssl=443
+	be_app=80
+	be_ssl=443
+
+	printf "Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:\n"
+	read -r cluster_id
+
+	printf "checking for an existing cloud-load-balancer service..\n"
+	clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster_id")
+
+	if [ -n "$clb" ]; then
+		printf "current loadbalancer(s):\n"
+		for lb in $clb; do
+			printf "  - (load-balancer) %s\n" "$lb"
+		done
+		printf "please delete these before continuing.. \n"
+		exit 1
+	else
+		printf "no load-balancer found, creating one now..\n" && sleep 1
+	fi
+
+	clb_package=$(triton package ls | fzf --header='please select a package size for your cloud-load-balancer instance(s). CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+	clb_external=$(triton network ls -l | fzf --header='please select an external network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
+	clb_internal=$(triton network ls -l | fzf --header='please select an internal network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
+	app_cns_suffix=$(triton cloudapi "/my/networks/$clb_internal" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
+	ctr_cns_suffix=$(triton cloudapi "/my/networks/$clb_external" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
+	app_cns="wrk-$cluster_id.$app_cns_suffix"
+	ctr_cns="ctr-$cluster_id.$ctr_cns_suffix"
+
+	for i in $(seq 1 2); do
+		triton inst create cloud-load-balancer $clb_package --name {{shortId}}-clb --network $clb_external --network $clb_internal \
+			-m cloud.tritoncompute:loadbalancer=true -m cloud.tritoncompute:max_rs="64" \
+			-m cloud.tritoncompute:portmap="tcp://$fe_ssl:$app_cns:$be_ssl,tcp://$fe_app:$app_cns:$be_app,tcp://$fe_ctr:$ctr_cns:$be_ctr" \
+			-t triton.cns.services="clb-$cluster_id" -t cluster=$cluster_id
+	done
+}
+
+main() {
+	account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
+	network=$(triton network ls -Hoid public=false)                    # Fabric Network UUID
+	kubernetes_version="1.29.8"
+	cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
+	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+
+	echo $cluster_id
+	interactive
 }
 
 ACTION="$1"
@@ -201,5 +255,6 @@ case "$ACTION" in
 "config") grab_kubeconfig ;;
 "upgrade") printf "not implemented yet\n" ;;
 "bastion") bastion ;;
+"clb") cloud_load_balancer ;;
 *) printf "invalid action.\n" usage ;;
 esac
