@@ -190,10 +190,17 @@ interactive() {
 cloud_load_balancer() {
 	ls_cluster
 
+	fe_ctr=6443
+	be_ctr=6443
+	fe_app=80
+	fe_ssl=443
+	be_app=80
+	be_ssl=443
+
 	printf "Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:\n"
 	read -r cluster_id
 
-	printf "checking for an existing cloud-load-balancer..\n"
+	printf "checking for an existing cloud-load-balancer service..\n"
 	clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster_id")
 
 	if [ -n "$clb" ]; then
@@ -201,30 +208,24 @@ cloud_load_balancer() {
 		for lb in $clb; do
 			printf "  - (load-balancer) %s\n" "$lb"
 		done
+		printf "please delete these before continuing.. \n"
 		exit 1
 	else
 		printf "no load-balancer found, creating one now..\n" && sleep 1
 	fi
 
-	printf "Would you like CNS to be Highly Available?\n"
-	read -r cns_ha
-
-	case "$cns_ha" in
-	"y" | "yes") clb_num="2" ;;
-	"n" | "no") clb_num="1" ;;
-	*) echo "Invalid Input, please type yes or no" && exit 1 ;;
-	esac
-
 	clb_package=$(triton package ls | fzf --header='please select a package size for your cloud-load-balancer instance(s). CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 	clb_external=$(triton network ls -l | fzf --header='please select an external network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
 	clb_internal=$(triton network ls -l | fzf --header='please select an internal network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
-	cns_suffix=$(triton cloudapi "/my/networks/$clb_internal" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
-	cluster_cns="wrk-$cluster_id.$cns_suffix"
+	app_cns_suffix=$(triton cloudapi "/my/networks/$clb_internal" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
+	ctr_cns_suffix=$(triton cloudapi "/my/networks/$clb_external" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
+	app_cns="wrk-$cluster_id.$app_cns_suffix"
+	ctr_cns="ctr-$cluster_id.$ctr_cns_suffix"
 
-	for i in $(seq 1 $clb_num); do
+	for i in $(seq 1 2); do
 		triton inst create cloud-load-balancer $clb_package --name {{shortId}}-clb --network $clb_external --network $clb_internal \
 			-m cloud.tritoncompute:loadbalancer=true -m cloud.tritoncompute:max_rs="64" \
-			-m cloud.tritoncompute:portmap="tcp://443:$cluster_cns:443,tcp://80:$cluster_cns:80" \
+			-m cloud.tritoncompute:portmap="tcp://$fe_ssl:$app_cns:$be_ssl,tcp://$fe_app:$app_cns:$be_app,tcp://$fe_ctr:$ctr_cns:$be_ctr" \
 			-t triton.cns.services="clb-$cluster_id" -t cluster=$cluster_id
 	done
 }
@@ -237,6 +238,7 @@ main() {
 	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 
+	echo $cluster_id
 	interactive
 }
 
@@ -253,6 +255,6 @@ case "$ACTION" in
 "config") grab_kubeconfig ;;
 "upgrade") printf "not implemented yet\n" ;;
 "bastion") bastion ;;
-"loadbalancer") cloud_load_balancer ;;
+"clb") cloud_load_balancer ;;
 *) printf "invalid action.\n" usage ;;
 esac
