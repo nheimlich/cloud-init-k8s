@@ -188,45 +188,153 @@ interactive() {
 }
 
 cloud_load_balancer() {
-	ls_cluster
+	unset fe_ctr be_ctr fe_app be_app fe_ssl be_ssl cluster package replicas interactive ext_uuid in_uuid interactive deletion
 
-	fe_ctr=6443
-	be_ctr=6443
-	fe_app=80
-	fe_ssl=443
-	be_app=80
-	be_ssl=443
+	# Default values for the options
+	fe_ctr=6443         # frontend for kubeapi
+	be_ctr=6443         # backend port for kubeapi
+	fe_app=80           # frontend for kube app
+	be_app=80           # backend for kube app
+	fe_ssl=443          # SSL frontend for kube app
+	be_ssl=443          # SSL backend for kube app
+	cluster=""          # Cluster ID to associate with CLB
+	package=""          # Package Size for CLB
+	replicas=2          # Default replicas count
+	interactive="false" # Interactive mode flag
+	ext_uuid=""         # External network UUID
+	in_uuid=""          # Internal network UUID
+	deletion="false"    # Deletion of CLB instances
 
-	printf "Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:\n"
-	read -r cluster_id
+	# Parse options
+	while getopts "c:p:f:b:x:y:r:e:n:hid" opt; do
+		case "$opt" in
+		c) cluster="$OPTARG" ;;  # Cluster ID
+		p) package="$OPTARG" ;;  # Package Size
+		f) fe_app="$OPTARG" ;;   # Frontend app port
+		b) be_app="$OPTARG" ;;   # Backend app port
+		x) fe_ssl="$OPTARG" ;;   # Frontend SSL port
+		y) be_ssl="$OPTARG" ;;   # Backend SSL port
+		r) replicas="$OPTARG" ;; # Replicas
+		i) interactive="true" ;; # Interactive mode flag
+		e) ext_uuid="$OPTARG" ;; # External network UUID
+		n) in_uuid="$OPTARG" ;;  # Internal network UUID
+		d) deletion="true" ;;    # Deletion of CLB instances
+		h) echo "Usage: $0 [-i]|[-d] [-c cluster] [-p package] [-e ext_uuid] [-n in_uuid] [-r replicas] [-f fe_app] [-b be_app] [-x fe_ssl] [-y be_ssl]\n" && exit 0 ;;
+		*) echo "Usage: $0 [-i]|[-d] [-c cluster] [-p package] [-e ext_uuid] [-n in_uuid] [-r replicas] [-f fe_app] [-b be_app] [-x fe_ssl] [-y be_ssl]\n" && exit 0 ;;
+		esac
+	done
 
-	printf "checking for an existing cloud-load-balancer service..\n"
-	clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster_id")
+	# Shift off processed options
+	shift $((OPTIND - 1))
 
-	if [ -n "$clb" ]; then
-		printf "current loadbalancer(s):\n"
-		for lb in $clb; do
-			printf "  - (load-balancer) %s\n" "$lb"
-		done
-		printf "please delete these before continuing.. \n"
-		exit 1
-	else
-		printf "no load-balancer found, creating one now..\n" && sleep 1
+	if [ "$OPTIND" -eq 1 ]; then
+		echo "Usage: $0 [-i]|[-d] [-c cluster] [-p package] [-e ext_uuid] [-n in_uuid] [-r replicas] [-f fe_app] [-b be_app] [-x fe_ssl] [-y be_ssl]" &&
+			exit 0
 	fi
 
-	clb_package=$(triton package ls | fzf --header='please select a package size for your cloud-load-balancer instance(s). CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
-	clb_external=$(triton network ls -l | fzf --header='please select an external network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
-	clb_internal=$(triton network ls -l | fzf --header='please select an internal network for your clb instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
-	app_cns_suffix=$(triton cloudapi "/my/networks/$clb_internal" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
-	ctr_cns_suffix=$(triton cloudapi "/my/networks/$clb_external" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
-	app_cns="wrk-$cluster_id.$app_cns_suffix"
-	ctr_cns="ctr-$cluster_id.$ctr_cns_suffix"
+	if [ "$deletion" == "true" ]; then
+		# Ask for the cluster ID if not provided
+		if [ -z "$cluster" ]; then
+			ls_cluster
+			printf "Enter the Cluster-ID you'd like to de-associate from your cloud-load-balancer:\n"
+			read -r cluster
+		fi
 
-	for i in $(seq 1 2); do
-		triton inst create cloud-load-balancer $clb_package --name {{shortId}}-clb --network $clb_external --network $clb_internal \
-			-m cloud.tritoncompute:loadbalancer=true -m cloud.tritoncompute:max_rs="64" \
+		instances=$(triton inst ls -Hoshortid tag.triton.cns.services="clb-$cluster")
+
+		if [ -n "$instances" ]; then
+			printf "\nDeleted Instances:\n"
+			echo "$instances" | xargs -I {} triton inst rm -f {}
+			exit 0
+		else
+			echo "No instances to delete"
+			exit 0
+		fi
+	fi
+
+	# Check if interactive mode is enabled and ask for cluster if not provided
+	if [ "$interactive" == "true" ]; then
+		if [ -z "$cluster" ]; then
+			ls_cluster
+			printf "Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:\n"
+			read -r cluster
+			clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster")
+			if [ -n "$clb" ]; then
+				echo "Existing load balancer(s) found. Please delete them before proceeding."
+				echo "Usage: ./tk8s -d"
+				exit 1
+			fi
+		fi
+		# Ask for the external and internal network UUIDs if not provided
+		if [ -z "$ext_uuid" ]; then
+			triton network ls -l
+			printf "Enter the External Network UUID:\n"
+			read -r ext_uuid
+		fi
+		if [ -z "$in_uuid" ]; then
+			triton network ls -l
+			printf "Enter the Internal Network UUID:\n"
+			read -r in_uuid
+		fi
+		if [ -z "$package" ]; then
+			(triton package ls)
+			printf "Enter the Package Short ID:\n"
+			read -r package
+		fi
+		if [ -z "$cluster" ] || [ -z "$ext_uuid" ] || [ -z "$in_uuid" ] || [ -z "$package" ]; then
+			echo "Missing required parameters: cluster, ext_uuid, or in_uuid"
+			exit 1
+		fi
+	fi
+
+	if [ -z "$cluster" ] || [ -z "$ext_uuid" ] || [ -z "$in_uuid" ] || [ -z "$package" ]; then
+		echo "Missing required parameters: cluster, package, ext_uuid, or in_uuid"
+		exit 1
+	fi
+
+	clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster")
+
+	if [ -n "$clb" ]; then
+		echo "Existing load balancer(s) found. Please delete them before proceeding."
+		exit 1
+	else
+		echo "No existing load balancer found, creating a new one..."
+	fi
+
+	# current setup information for confirmation
+	echo "Cluster: $cluster"
+	echo "Package: $package"
+	echo "Replicas: $replicas"
+	echo "External Network UUID: $ext_uuid"
+	echo "Internal Network UUID: $in_uuid"
+	echo "Frontend Kube API port: $fe_ctr"
+	echo "Backend Kube API port: $be_ctr"
+	echo "Frontend SSL port: $fe_ssl"
+	echo "Backend SSL port: $be_ssl"
+	echo "Interactive: $interactive"
+
+	printf "\nWould you like to proceed?\n"
+	read -r selection
+	case "$selection" in
+	"n" | "no") exit 1 ;;
+	"y" | "yes") continue ;;
+	*) echo "Invalid Input, please choose yes/no" && exit 1 ;;
+	esac
+
+	int_cns_suffix=$(triton cloudapi "/my/networks/$in_uuid" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
+	ext_cns_suffix=$(triton cloudapi "/my/networks/$ext_uuid" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
+
+	app_cns="wrk-$cluster.$int_cns_suffix"
+	ctr_cns="ctr-$cluster.$int_cns_suffix"
+
+	# Create load balancer instances
+	for i in $(seq 1 "$replicas"); do
+		triton inst create cloud-load-balancer $package --name {{shortId}}-clb \
+			--network $ext_uuid --network $in_uuid \
+			-m cloud.tritoncompute:loadbalancer=true \
+			-m cloud.tritoncompute:max_rs="64" \
 			-m cloud.tritoncompute:portmap="tcp://$fe_ssl:$app_cns:$be_ssl,tcp://$fe_app:$app_cns:$be_app,tcp://$fe_ctr:$ctr_cns:$be_ctr" \
-			-t triton.cns.services="clb-$cluster_id" -t cluster=$cluster_id
+			-t triton.cns.services="clb-$cluster" -t cluster="$cluster"
 	done
 }
 
@@ -238,15 +346,12 @@ main() {
 	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 
-	echo $cluster_id
 	interactive
 }
 
 ACTION="$1"
 
-if [ "$#" -ne 1 ]; then
-	usage
-fi
+shift
 
 case "$ACTION" in
 "up") main ;;
@@ -255,6 +360,6 @@ case "$ACTION" in
 "config") grab_kubeconfig ;;
 "upgrade") printf "not implemented yet\n" ;;
 "bastion") bastion ;;
-"clb") cloud_load_balancer ;;
-*) printf "invalid action.\n" usage ;;
+"clb") cloud_load_balancer "$@" ;;
+*) printf "invalid action.\n" && usage ;;
 esac
