@@ -16,18 +16,80 @@ usage() {
 }
 
 bastion() {
+	unset interactive deletion bastion bst_package bst_image
+
+	# Default values for flag options
+	interactive="false" # Interactive Flag
+	deletion="false"    # Deletion Flag
+	bst_package=""      # Bastion Package
+	bst_image=""        # Bastion Image
+
+	usage() {
+		echo "Usage: $0 [-i] [-d] [-p package] [-g image]"
+		echo "  -i              Run in interactive mode."
+		echo "  -d              Delete an existing bastion instance."
+		echo "  -p package      Specify the bastion package."
+		echo "  -g image        Specify the bastion image."
+		echo "  -h              Show this help message."
+		exit 1
+	}
+
+	# Parse options
+	while getopts "p:g:hid" opt; do
+		case "$opt" in
+		p) bst_package="$OPTARG" ;; # Bastion Package
+		g) bst_image="$OPTARG" ;;   # Bastion Image
+		i) interactive="true" ;;    # Interactive mode flag
+		d) deletion="true" ;;       # Deletion of Bastion Instance
+		h) usage ;;
+		*) usage ;;
+		esac
+	done
+
+	# Shift off processed options
+	shift $((OPTIND - 1))
+
+	if [ "$OPTIND" -eq 1 ]; then
+		usage
+	fi
+
+	if [ "$deletion" == "true" ]; then
+		printf "checking for an existing bastion host..\n"
+		bastion=$(triton inst ls -Honame tag.triton.cns.services="bastion")
+		if [ -n "$bastion" ]; then
+			printf "\nDeleted Instances:\n"
+			echo "$bastion" | xargs -I {} triton inst rm -f {}
+			exit 0
+		else
+			echo "No instances to delete"
+			exit 0
+		fi
+	fi
+
 	printf "checking for an existing bastion host..\n"
 	bastion=$(triton inst ls -Honame tag.triton.cns.services="bastion")
 
 	if [ -n "$bastion" ]; then
 		printf "current bastion:"
 		printf "  - (bastion) %s\n" "$bastion" && exit 1
-	else
-		printf "no bastion found, creating one now..\n" && sleep 1
 	fi
 
-	bst_package=$(triton package ls | fzf --header='please select a package size for your bastion instance. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
-	bst_image=$(triton image ls type=zone-dataset os=smartos name='base-64-lts' | sort -k2,2 -k3,3r | fzf --header='please select a image for your bastion-host. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
+	if [ "$interactive" == "true" ]; then
+		if [ -z "$bst_package" ]; then
+			triton package ls
+			printf "\nEnter the desired bastion package:\n"
+			read -r bst_package
+		fi
+		if [ -z "$bst_image" ]; then
+			triton image ls type=zone-dataset os=smartos name='base-64-lts' | sort -k2,2 -k3,3r
+			printf "\nEnter the desired bastion image:\n"
+			read -r bst_image
+		fi
+		if [ -z "$bst_package" ] || [ -z "$bst_image" ]; then
+			echo "Missing required parameters: bst_package or bst_image"
+			exit 1
+		fi
+	fi
 
 	triton inst create -n {{shortId}}-bastion "$bst_image" "$bst_package" -t triton.cns.services="bastion" -t role="bastion"
 }
@@ -359,7 +421,7 @@ case "$ACTION" in
 "ls") ls_cluster ;;
 "config") grab_kubeconfig ;;
 "upgrade") printf "not implemented yet\n" ;;
-"bastion") bastion ;;
+"bastion") bastion "$@" ;;
 "clb") cloud_load_balancer "$@" ;;
 *) printf "invalid action.\n" && usage ;;
 esac
