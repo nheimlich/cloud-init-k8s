@@ -59,3 +59,54 @@ Enter the Cluster-ID you'd like to grab your kubeconfig from: ae78e3f9
 apiVersion: v1
 ****
 ```
+
+## Addons
+
+### Bastion (SSH)
+##### Bastion Options:
+```
+Usage: ./tk8s.sh bastion [-i] [-d] [-p package] [-g image]
+  -i              Run in interactive mode.
+  -d              Delete an existing bastion instance.
+  -p package      Specify the bastion package.
+  -g image        Specify the bastion image.
+  -h              Show this help message.
+```
+##### Creating a Bastion Instance /w flags
+```
+❯ ./tk8s.sh bastion -p 5b82556d -g 8adac45a
+Checking for an existing bastion host..
+
+Creating instance f47f4d0e-bastion (f47f4d0e-fd99-4ab0-ae98-18e32899df83, base-64-lts@23.4.0)
+```
+##### Creating a Bastion Instance Interactively
+```
+❯ ./tk8s.sh bastion -i
+checking for an existing bastion host..
+
+SHORTID   NAME            MEMORY  SWAP   DISK  VCPUS
+48adbe6c  lb1.small           4G    8G    50G      4
+5b82556d  g1.nano           512M    1G     5G      1
+...
+
+Enter the desired bastion package:
+5b82556d
+
+SHORTID   NAME         VERSION  FLAGS  OS       TYPE          PUBDATE
+8adac45a  base-64-lts  23.4.0   P      smartos  zone-dataset  2024-01-06
+e44ed3e0  base-64-lts  22.4.0   P      smartos  zone-dataset  2023-01-10
+...
+
+Enter the desired bastion image:
+8adac45a
+
+Creating instance 967a4b0c-bastion (967a4b0c-30ef-444a-abc5-2b9ee0aa289e, base-64-lts@23.4.0)
+```
+##### Deleting a Bastion Instance
+```
+❯ ./tk8s.sh bastion -d
+checking for an existing bastion host..
+
+Deleted Instances:
+Delete (async) instance 967a4b0c-bastion (967a4b0c-30ef-444a-abc5-2b9ee0aa289e)
+```
