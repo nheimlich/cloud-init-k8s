@@ -15,7 +15,6 @@ usage() {
 	exit 1
 }
 
-
 suffix() {
 	printf "For an instance suffix, please type it now (Example: {{shortId}}.suffix), or press enter to skip:\n"
 	read -r suffix
@@ -26,30 +25,6 @@ suffix() {
 	else
 		name_modifier=".$suffix"
 	fi
-}
-
-ctr() {
-	echo "creating control-plane members:"
-
-	triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init"
-
-	num_ctr=$((num_ctr - 1))
-
-	for i in $(seq 1 "$num_ctr"); do
-		triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr"
-	done
-	wait
-
-}
-
-wrk() {
-	echo "creating data plane members:"
-
-	for i in $(seq 1 "$num_wrk"); do
-		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -t tritoncli.ssh.proxy="$(triton inst ls -Hoshortid tag.role=bastion)" -m tag="wrk" --nic ipv4_uuid="$network"
-	done
-	wait
-
 }
 
 dev_env() {
@@ -90,8 +65,23 @@ prd_env() {
 	ctr_package=$(triton package ls | fzf --header='please select a package size for your control-plane instances. CTRL-c or ESC to quit' --layout=reverse-list | awk '{print $1}')
 	wrk_package=$(triton package ls | fzf --header='please select a package size for your data-plane instances. CTRL-c or ESC to exit' --layout=reverse-list | awk '{print $1}')
 
-	ctr
-	wrk
+	echo "creating control-plane members:"
+
+	triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init"
+
+	num_ctr=$((num_ctr - 1))
+
+	for i in $(seq 1 "$num_ctr"); do
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr"
+	done
+	wait
+
+	echo "creating data plane members:"
+
+	for i in $(seq 1 "$num_wrk"); do
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -t tritoncli.ssh.proxy="$(triton inst ls -Hoshortid tag.role=bastion)" -m tag="wrk" --nic ipv4_uuid="$network"
+	done
+	wait
 }
 
 ls_cluster() {
@@ -360,14 +350,6 @@ bastion() {
 		usage
 	fi
 
-	printf "checking for an existing bastion host..\n"
-	bastion=$(triton inst ls -Honame tag.triton.cns.services="bastion")
-
-	if [ -n "$bastion" ]; then
-		printf "current bastion:"
-		printf "  - (bastion) %s\n" "$bastion" && exit 1
-	fi
-
 	if [ "$deletion" == "true" ]; then
 		printf "checking for an existing bastion host..\n"
 		bastion=$(triton inst ls -Honame tag.triton.cns.services="bastion")
@@ -381,7 +363,14 @@ bastion() {
 		fi
 	fi
 
+	#validate bastion doesn't already exist
+	bastion=$(triton inst ls -Honame tag.triton.cns.services="bastion")
+	if [ -n "$bastion" ]; then
+		printf "current bastion:"
+		printf "  - (bastion) %s\n" "$bastion" && exit 1
+	fi
 
+	#interactive for gathering missing parameters
 	if [ "$interactive" == "true" ]; then
 		if [ -z "$bst_package" ]; then
 			triton package ls
