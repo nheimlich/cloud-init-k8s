@@ -61,7 +61,95 @@ apiVersion: v1
 ```
 
 ## Addons
+### Cloud Load Balancer
+##### Cloud Load Balancer Options:
+```
+❯ ./tk8s.sh clb
+Usage: ./tk8s.sh clb [-i] [-d] [-p package] [-g image]
+  -i              Run in interactive mode.
+  -d              Delete an existing bastion instance.
+  -c cluster      Specify the associated cluster.
+  -p package      Specify the clb package.
+  -e ext_uuid     Specify the external network UUID.
+  -n in_uuid      Specify the internal network UUID.
+  -r replicas     Specify the number of replicas.
+  -f fe_app       Specify the frontend app port.
+  -b be_app       Specify the backend app port.
+  -x fe_ssl       Specify the frontend SSL port.
+  -y be_ssl       Specify the backend SSL port.
+  -h              Show this help message.
+```
+##### Creating a Cloud Load Balancer /w flags
+```
+❯ ./tk8s.sh clb -c a3de2066 -p 48adbe6c -e 468473cf-6450-455d-b298-4e826a5cfce7 -n 468473cf-6450-455d-b298-4e826a5cfce7
+```
+##### Creating a Cloud Load Balancer Interactively
+```
+❯ ./tk8s.sh clb -i
+checking for existing clusters..
+current clusters:
+-----------------------
+cluster: 455cca75
+instances:
+  - (control-plane) f5d0cd06
+  - (control-plane) 7e3ecf6e
+  - (control-plane) f1438a2a
+  - (data-plane) 6fb2a961
+-----------------------
+cluster: a3de2066
+...
 
+Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:
+455cca75
+
+ID                                    NAME               SUBNET            GATEWAY        FABRIC  VLAN  PUBLIC
+468473cf-6450-455d-b298-4e826a5cfce7  Public-01          -                 -              -       -     true
+468473cf-6450-455d-b298-4e826a5cfce7  Public-02          -                 -              -       -     true
+468473cf-6450-455d-b298-4e826a5cfce7  PRIVATE_123        -                 -              -       -     true
+468473cf-6450-455d-b298-4e826a5cfce7  My-Fabric-Network  192.168.128.0/22  192.168.128.1  true    2     false
+
+Enter the External Network UUID:
+468473cf-6450-455d-b298-4e826a5cfce7
+
+ID                                    NAME               SUBNET            GATEWAY        FABRIC  VLAN  PUBLIC
+468473cf-6450-455d-b298-4e826a5cfce7  Public-01          -                 -              -       -     true
+468473cf-6450-455d-b298-4e826a5cfce7  Public-02          -                 -              -       -     true
+468473cf-6450-455d-b298-4e826a5cfce7  PRIVATE_123        -                 -              -       -     true
+468473cf-6450-455d-b298-4e826a5cfce7  My-Fabric-Network  192.168.128.0/22  192.168.128.1  true    2     false
+
+Enter the Internal Network UUID:
+468473cf-6450-455d-b298-4e826a5cfce7
+
+SHORTID   NAME            MEMORY  SWAP   DISK  VCPUS
+48adbe6c  lb1.small           4G    8G    50G      4
+5b82556d  g1.nano           512M    1G     5G      1
+...
+
+Enter the Package Short ID:
+48adbe6c
+
+No existing load balancer found, creating a new one...
+Cluster: 455cca75
+Package: 48adbe6c
+Replicas: 2
+External Network UUID: 468473cf-6450-455d-b298-4e826a5cfce7
+Internal Network UUID: 468473cf-6450-455d-b298-4e826a5cfce7
+Frontend Kube API port: 6443
+Backend Kube API port: 6443
+Frontend SSL port: 443
+Backend SSL port: 443
+Interactive: true
+
+Would you like to proceed?
+y
+
+Creating instance 9529af7f-clb (9529af7f-eaf5-4cc5-a370-a44888950d40, cloud-load-balancer@)
+Creating instance 97ae7dee-clb (97ae7dee-46e6-4e83-855e-aa993bfc8907, cloud-load-balancer@)
+```
+##### Deleting a Cloud Load Balancer
+```
+❯ ./tk8s.sh clb -d
+```
 ### Bastion (SSH)
 ##### Bastion Options:
 ```

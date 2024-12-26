@@ -10,8 +10,8 @@ usage() {
 	echo " ls      -- show existing clusters"
 	echo " config  -- get kubeconfig from an existing cluster"
 	echo " upgrade -- upgrade Clusters to a new version"
-	echo " bastion -- create a trk8s bastion host"
-	echo " clb     -- create a load balancer service"
+	echo " bastion -- manage a trk8s bastion host"
+	echo " clb     -- manage cloud load balancer services"
 	exit 1
 }
 
@@ -179,22 +179,39 @@ cloud_load_balancer() {
 	in_uuid=""          # Internal network UUID
 	deletion="false"    # Deletion of CLB instances
 
+	usage() {
+		echo "Usage: $0 clb [-i] [-d] [-p package] [-g image]"
+		echo "  -i              Run in interactive mode."
+		echo "  -d              Delete an existing bastion instance."
+		echo "  -c cluster      Specify the associated cluster."
+		echo "  -p package      Specify the clb package."
+		echo "  -e ext_uuid     Specify the external network UUID."
+		echo "  -n in_uuid      Specify the internal network UUID."
+		echo "  -r replicas     Specify the number of replicas."
+		echo "  -f fe_app       Specify the frontend app port."
+		echo "  -b be_app       Specify the backend app port."
+		echo "  -x fe_ssl       Specify the frontend SSL port."
+		echo "  -y be_ssl       Specify the backend SSL port."
+		echo "  -h              Show this help message."
+		exit 1
+	}
+
 	# Parse options
-	while getopts "c:p:f:b:x:y:r:e:n:hid" opt; do
+	while getopts "c:p:e:n:r:f:b:x:y:hid" opt; do
 		case "$opt" in
 		c) cluster="$OPTARG" ;;  # Cluster ID
 		p) package="$OPTARG" ;;  # Package Size
+		e) ext_uuid="$OPTARG" ;; # External network UUID
+		n) in_uuid="$OPTARG" ;;  # Internal network UUID
+		r) replicas="$OPTARG" ;; # Replicas
 		f) fe_app="$OPTARG" ;;   # Frontend app port
 		b) be_app="$OPTARG" ;;   # Backend app port
 		x) fe_ssl="$OPTARG" ;;   # Frontend SSL port
 		y) be_ssl="$OPTARG" ;;   # Backend SSL port
-		r) replicas="$OPTARG" ;; # Replicas
 		i) interactive="true" ;; # Interactive mode flag
-		e) ext_uuid="$OPTARG" ;; # External network UUID
-		n) in_uuid="$OPTARG" ;;  # Internal network UUID
 		d) deletion="true" ;;    # Deletion of CLB instances
-		h) echo "Usage: $0 [-i]|[-d] [-c cluster] [-p package] [-e ext_uuid] [-n in_uuid] [-r replicas] [-f fe_app] [-b be_app] [-x fe_ssl] [-y be_ssl]\n" && exit 0 ;;
-		*) echo "Usage: $0 [-i]|[-d] [-c cluster] [-p package] [-e ext_uuid] [-n in_uuid] [-r replicas] [-f fe_app] [-b be_app] [-x fe_ssl] [-y be_ssl]\n" && exit 0 ;;
+		h) usage ;;
+		*) usage ;;
 		esac
 	done
 
@@ -202,8 +219,7 @@ cloud_load_balancer() {
 	shift $((OPTIND - 1))
 
 	if [ "$OPTIND" -eq 1 ]; then
-		echo "Usage: $0 [-i]|[-d] [-c cluster] [-p package] [-e ext_uuid] [-n in_uuid] [-r replicas] [-f fe_app] [-b be_app] [-x fe_ssl] [-y be_ssl]" &&
-			exit 0
+		usage
 	fi
 
 	if [ "$deletion" == "true" ]; then
@@ -322,7 +338,7 @@ bastion() {
 	bst_image=""        # Bastion Image
 
 	usage() {
-		echo "Usage: $0 [-i] [-d] [-p package] [-g image]"
+		echo "Usage: $0 bastion [-i] [-d] [-p package] [-g image]"
 		echo "  -i              Run in interactive mode."
 		echo "  -d              Delete an existing bastion instance."
 		echo "  -p package      Specify the bastion package."
