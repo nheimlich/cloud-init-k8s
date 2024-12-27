@@ -54,9 +54,12 @@ write_files:
       export KUBECONFIG=/etc/kubernetes/admin.conf
       echo "export KUBECONFIG=/etc/kubernetes/admin.conf" | tee -a /root/.bashrc
 
-      kubeadm init --upload-certs --kubernetes-version v$k8ver --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans dev-$(mdata-get cluster).svc.$(mdata-get account).us-central-1.triton.zone --control-plane-endpoint dev-$(mdata-get cluster).svc.$(mdata-get account).us-central-1.cns.mnx.io
+      if [ $(mdata-get dev_cert_sans) == "0" ]; then
+        kubeadm init --upload-certs --kubernetes-version v$k8ver --skip-phases=addon/kube-proxy $(mdata-get dev_control_plane_endpoint)
+      else
+        kubeadm init --upload-certs --kubernetes-version v$k8ver --skip-phases=addon/kube-proxy $(mdata-get dev_control_plane_endpoint) $(mdata-get dev_cert_sans)
+      fi
 
-      sed -i'' 's/cns\.mnx\.io/triton\.zone/g' /etc/kubernetes/admin.conf
       cat /etc/kubernetes/admin.conf | mdata-put admin.conf
 
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
@@ -86,7 +89,11 @@ write_files:
       export PRIVIP=$(ip addr | grep -v 'cilium' | grep -Po 'inet \K(192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]{1,3}\.[0-9]{1,3}|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})')
       mkdir -p /var/k8s/
 
-      kubeadm init --upload-certs --kubernetes-version v$k8ver --skip-phases=addon/kube-proxy --apiserver-cert-extra-sans ctr-$(mdata-get cluster).svc.$(mdata-get account).us-central-1.triton.zone,clb-$(mdata-get cluster).svc.$(mdata-get account).us-central-1.triton.zone --control-plane-endpoint ctr-$(mdata-get cluster).svc.$(mdata-get account).us-central-1.cns.mnx.io
+      if [ $(mdata-get prod_cert_sans) == "0" ]; then
+        kubeadm init --upload-certs --kubernetes-version v$k8ver --skip-phases=addon/kube-proxy $(mdata-get prod_control_plane_endpoint)
+      else
+        kubeadm init --upload-certs --kubernetes-version v$k8ver --skip-phases=addon/kube-proxy $(mdata-get prod_control_plane_endpoint) $(mdata-get prod_cert_sans)
+      fi
 
       echo $(kubeadm token create --print-join-command) --control-plane --certificate-key $(kubeadm init phase upload-certs --upload-certs | grep -vw -e certificate -e Namespace) > /var/k8s/join-ctr.sh
 
@@ -95,7 +102,6 @@ write_files:
       export KUBECONFIG=/etc/kubernetes/admin.conf
       echo "export KUBECONFIG=/etc/kubernetes/admin.conf" | tee -a /root/.bashrc
 
-      sed -i'' 's/cns\.mnx\.io/triton\.zone/g' /etc/kubernetes/admin.conf
       cat /etc/kubernetes/admin.conf | mdata-put admin.conf
 
       kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
@@ -139,10 +145,9 @@ write_files:
 
       kubeadm config images pull --kubernetes-version v$k8ver
 
-      export ACCT=$(mdata-get account)
       export CLUSTER=$(mdata-get cluster)
       export TAG=$(mdata-get tag)
-      export SRC=init-$CLUSTER.svc.$ACCT.us-central-1.cns.mnx.io
+      export SRC=init-$CLUSTER.$(mdata-get int_cns_suffix)
 
       while [[ "$(curl -k -s -o /dev/null -w ''%{http_code}'' http://$SRC:8000/join-$TAG.sh)" != "200" ]]; do sleep 2; done
 
