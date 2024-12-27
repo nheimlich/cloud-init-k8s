@@ -23,15 +23,22 @@ usage() {
 		exit 1
 		;;
 	down)
-		echo "Usage: $0 down [-i] [-c cluster]"
-		echo "  -i              Run in interactive mode. (default)"
-		echo "  -c              Delete a specific cluster."
-		echo "  -h              Show this help message."
+		echo "usage: $0 down [-i] [-c cluster]"
+		echo "  -i              run in interactive mode. (default)"
+		echo "  -c              delete a specific cluster."
+		echo "  -h              show this help message."
+		exit 1
+		;;
+	config)
+		echo "usage: $0 config [-i] [-c cluster]"
+		echo "  -i              run in interactive mode. (default)"
+		echo "  -c              grab config from a specific cluster."
+		echo "  -h              show this help message."
 		exit 1
 		;;
 	bastion)
 		echo "Usage: $0 bastion [-i] [-d] [-p package] [-g image]"
-		echo "  -i              Run in interactive mode."
+		echo "  -i              Run in interactive mode (default)."
 		echo "  -d              Delete an existing bastion instance."
 		echo "  -p package      Specify the bastion package."
 		echo "  -g image        Specify the bastion image."
@@ -40,7 +47,7 @@ usage() {
 		;;
 	clb)
 		echo "Usage: $0 clb [-i] [-d] [-p package] [-g image]"
-		echo "  -i              Run in interactive mode."
+		echo "  -i              Run in interactive mode. (default)"
 		echo "  -d              Delete an existing bastion instance."
 		echo "  -c cluster      Specify the associated cluster."
 		echo "  -p package      Specify the clb package."
@@ -279,10 +286,29 @@ rm_cluster() {
 }
 
 grab_kubeconfig() {
-	ls_cluster
+	unset interactive cluster_id
 
-	printf "Enter the Cluster-ID you'd like to grab your kubeconfig from: "
-	read -r cluster_id
+	# Default values for flag options
+	cluster_id=""       # Cluster ID
+	interactive="false" # Interactive Flag
+
+	if [ "$#" -eq 0 ]; then
+		interactive="true"
+	elif [ "$#" -ne 0 ]; then
+		while getopts "c:hi" opt; do
+			case "$opt" in
+			c) cluster_id="$OPTARG" ;; # Bastion Package
+			i) interactive="true" ;;   # Interactive mode flag
+			h) usage config ;;
+			*) usage config ;;
+			esac
+		done
+	fi
+
+	if [ "$interactive" == "true" ]; then
+		ls_cluster
+		prompt_for_input "Enter the Cluster-ID you'd like to grab your kubeconfig from:" cluster_id false
+	fi
 
 	prd=$(triton inst metadata get "$(triton inst ls -Hoshortid tag.triton.cns.services="init-$cluster_id,ctr-$cluster_id")" admin.conf 2>/dev/null)
 	dev=$(triton inst metadata get "$(triton inst ls -Hoshortid tag.triton.cns.services="dev-$cluster_id")" admin.conf 2>/dev/null)
@@ -300,6 +326,17 @@ grab_kubeconfig() {
 cloud_load_balancer() {
 	unset fe_ctr be_ctr fe_app be_app fe_ssl be_ssl cluster package replicas interactive ext_uuid in_uuid interactive deletion
 
+	validate_clb() {
+		clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster")
+		if [ -n "$clb" ]; then
+			echo "Existing load balancer(s) found. Please delete them before proceeding."
+			echo "Usage: ./tk8s down -c $cluster"
+			exit 1
+		else
+			echo "No existing load balancer found, creating a new one..."
+		fi
+	}
+
 	# Default values for the options
 	fe_ctr=6443         # frontend for kubeapi
 	be_ctr=6443         # backend port for kubeapi
@@ -316,37 +353,51 @@ cloud_load_balancer() {
 	deletion="false"    # Deletion of CLB instances
 
 	# Parse options
-	while getopts "c:p:e:n:r:f:b:x:y:hid" opt; do
-		case "$opt" in
-		c) cluster="$OPTARG" ;;  # Cluster ID
-		p) package="$OPTARG" ;;  # Package Size
-		e) ext_uuid="$OPTARG" ;; # External network UUID
-		n) in_uuid="$OPTARG" ;;  # Internal network UUID
-		r) replicas="$OPTARG" ;; # Replicas
-		f) fe_app="$OPTARG" ;;   # Frontend app port
-		b) be_app="$OPTARG" ;;   # Backend app port
-		x) fe_ssl="$OPTARG" ;;   # Frontend SSL port
-		y) be_ssl="$OPTARG" ;;   # Backend SSL port
-		i) interactive="true" ;; # Interactive mode flag
-		d) deletion="true" ;;    # Deletion of CLB instances
-		h) usage clb ;;
-		*) usage clb ;;
-		esac
-	done
 
-	# Shift off processed options
-	shift $((OPTIND - 1))
+	if [ "$#" -eq 0 ]; then
+		interactive="true"
+	elif [ "$#" -ne 0 ]; then
+		while getopts "c:p:e:n:r:f:b:x:y:hid" opt; do
+			case "$opt" in
+			c) cluster="$OPTARG" ;;  # Cluster ID
+			p) package="$OPTARG" ;;  # Package Size
+			e) ext_uuid="$OPTARG" ;; # External network UUID
+			n) in_uuid="$OPTARG" ;;  # Internal network UUID
+			r) replicas="$OPTARG" ;; # Replicas
+			f) fe_app="$OPTARG" ;;   # Frontend app port
+			b) be_app="$OPTARG" ;;   # Backend app port
+			x) fe_ssl="$OPTARG" ;;   # Frontend SSL port
+			y) be_ssl="$OPTARG" ;;   # Backend SSL port
+			i) interactive="true" ;; # Interactive mode flag
+			d) deletion="true" ;;    # Deletion of CLB instances
+			h) usage clb ;;
+			*) usage clb ;;
+			esac
+		done
+		# Shift off processed options
+		shift $((OPTIND - 1))
 
-	if [ "$OPTIND" -eq 1 ]; then
-		usage clb
+		if [ "$OPTIND" -eq 1 ]; then
+			usage clb
+		fi
+	fi
+
+	if [ "$interactive" == "true" ]; then
+		ls_cluster
+		prompt_for_input "Enter the Cluster-ID you'd like to associate to your cloud-load-balancer:" cluster false
+		validate_clb
+		triton network ls -l
+		prompt_for_input "Enter the External Network UUID:" ext_uuid false
+		prompt_for_input "Enter the Internal Network UUID:" in_uuid false
+		triton package ls
+		prompt_for_input "Enter the Package Short ID:" package false
 	fi
 
 	if [ "$deletion" == "true" ]; then
 		# Ask for the cluster ID if not provided
 		if [ -z "$cluster" ]; then
 			ls_cluster
-			printf "Enter the Cluster-ID you'd like to de-associate from your cloud-load-balancer:\n"
-			read -r cluster
+			prompt_for_input "Enter the Cluster-ID you'd like to de-associate from your cloud-load-balancer:" cluster false
 		fi
 
 		instances=$(triton inst ls -Hoshortid tag.triton.cns.services="clb-$cluster")
@@ -361,54 +412,12 @@ cloud_load_balancer() {
 		fi
 	fi
 
-	# Check if interactive mode is enabled and ask for cluster if not provided
-	if [ "$interactive" == "true" ]; then
-		if [ -z "$cluster" ]; then
-			ls_cluster
-			printf "Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:\n"
-			read -r cluster
-			clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster")
-			if [ -n "$clb" ]; then
-				echo "Existing load balancer(s) found. Please delete them before proceeding."
-				echo "Usage: ./tk8s -d"
-				exit 1
-			fi
-		fi
-		# Ask for the external and internal network UUIDs if not provided
-		if [ -z "$ext_uuid" ]; then
-			triton network ls -l
-			printf "\nEnter the External Network UUID:\n"
-			read -r ext_uuid
-		fi
-		if [ -z "$in_uuid" ]; then
-			triton network ls -l
-			printf "\nEnter the Internal Network UUID:\n"
-			read -r in_uuid
-		fi
-		if [ -z "$package" ]; then
-			(triton package ls)
-			printf "\nEnter the Package Short ID:\n"
-			read -r package
-		fi
-		if [ -z "$cluster" ] || [ -z "$ext_uuid" ] || [ -z "$in_uuid" ] || [ -z "$package" ]; then
-			echo "Missing required parameters: cluster, ext_uuid, or in_uuid"
-			exit 1
-		fi
-	fi
-
 	if [ -z "$cluster" ] || [ -z "$ext_uuid" ] || [ -z "$in_uuid" ] || [ -z "$package" ]; then
 		echo "Missing required parameters: cluster, package, ext_uuid, or in_uuid"
 		exit 1
 	fi
 
-	clb=$(triton inst ls -Honame tag.triton.cns.services="clb-$cluster")
-
-	if [ -n "$clb" ]; then
-		echo "Existing load balancer(s) found. Please delete them before proceeding."
-		exit 1
-	else
-		echo "No existing load balancer found, creating a new one..."
-	fi
+	validate_clb
 
 	int_cns_suffix=$(triton cloudapi "/my/networks/$in_uuid" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
 	ext_cns_suffix=$(triton cloudapi "/my/networks/$ext_uuid" | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//')
@@ -417,18 +426,7 @@ cloud_load_balancer() {
 	ctr_cns="ctr-$cluster.$int_cns_suffix"
 
 	# current setup information for confirmation
-	echo "Cluster: $cluster"
-	echo "Package: $package"
-	echo "Replicas: $replicas"
-	echo "External Network UUID: $ext_uuid"
-	echo "Internal Network UUID: $in_uuid"
-	echo "Frontend Kube API port: $fe_ctr"
-	echo "Backend Kube API port: $be_ctr"
-	echo "Frontend SSL port: $fe_ssl"
-	echo "Backend SSL port: $be_ssl"
-	echo "Internal CNS: $app_cns"
-	echo "External CNS: $ctr_cns"
-	echo "Interactive: $interactive"
+	printf "\nCluster: %s\nPackage: %s\nReplicas: %s\nExternal Network UUID: %s\nInternal Network UUID: %s\nFrontend Kube API port: %s\nBackend Kube API port: %s\nFrontend SSL port: %s\nBackend SSL port: %s\nInternal CNS: %s\nExternal CNS: %s\nInteractive: %s\n" "$cluster" "$package" "$replicas" "$ext_uuid" "$in_uuid" "$fe_ctr" "$be_ctr" "$fe_ssl" "$be_ssl" "$app_cns" "$ctr_cns" "$interactive"
 
 	selection
 
@@ -449,26 +447,31 @@ bastion() {
 	# Default values for flag options
 	interactive="false" # Interactive Flag
 	deletion="false"    # Deletion Flag
-	bst_package=""      # Bastion Package
-	bst_image=""        # Bastion Image
+	package=""          # Bastion Package
+	image=""            # Bastion Image
 
-	# Parse options
-	while getopts "p:g:hid" opt; do
-		case "$opt" in
-		p) bst_package="$OPTARG" ;; # Bastion Package
-		g) bst_image="$OPTARG" ;;   # Bastion Image
-		i) interactive="true" ;;    # Interactive mode flag
-		d) deletion="true" ;;       # Deletion of Bastion Instance
-		h) usage bastion ;;
-		*) usage bastion ;;
-		esac
-	done
+	if [ "$#" -eq 0 ]; then
+		interactive="true"
+	elif [ "$#" -ne 0 ]; then
+		# Parse options
+		while getopts "p:g:hid" opt; do
+			case "$opt" in
+			p) package="$OPTARG" ;;  # Bastion Package
+			g) image="$OPTARG" ;;    # Bastion Image
+			i) interactive="true" ;; # Interactive mode flag
+			d) deletion="true" ;;    # Deletion of Bastion Instance
+			h) usage bastion ;;
+			*) usage bastion ;;
+			esac
+		done
 
-	# Shift off processed options
-	shift $((OPTIND - 1))
+		# Shift off processed options
+		shift $((OPTIND - 1))
 
-	if [ "$OPTIND" -eq 1 ]; then
-		usage bastion
+		if [ "$OPTIND" -eq 1 ]; then
+			usage bastion
+		fi
+
 	fi
 
 	if [ "$deletion" == "true" ]; then
@@ -493,23 +496,15 @@ bastion() {
 
 	#interactive for gathering missing parameters
 	if [ "$interactive" == "true" ]; then
-		if [ -z "$bst_package" ]; then
-			triton package ls
-			printf "\nEnter the desired bastion package:\n"
-			read -r bst_package
-		fi
-		if [ -z "$bst_image" ]; then
-			triton image ls type=zone-dataset os=smartos name='base-64-lts' | sort -k2,2 -k3,3r
-			printf "\nEnter the desired bastion image:\n"
-			read -r bst_image
-		fi
-		if [ -z "$bst_package" ] || [ -z "$bst_image" ]; then
+		prompt_for_input "Enter the desired bastion package:" package false
+		prompt_for_input "Enter the desired bastion image:" image false
+		if [ -z "$package" ] || [ -z "$image" ]; then
 			echo "Missing required parameters: bst_package or bst_image"
 			exit 1
 		fi
 	fi
 
-	triton inst create -n {{shortId}}-bastion "$bst_image" "$bst_package" -t triton.cns.services="bastion" -t role="bastion"
+	triton inst create -n {{shortId}}-bastion "$image" "$package" -t triton.cns.services="bastion" -t role="bastion"
 }
 
 up_cluster() {
@@ -548,7 +543,7 @@ case "$ACTION" in
 "up") up_cluster "$@" ;;
 "down") rm_cluster "$@" ;;
 "ls") ls_cluster ;;
-"config") grab_kubeconfig ;;
+"config") grab_kubeconfig "$@" ;;
 "upgrade") printf "not implemented yet\n" ;;
 "bastion") bastion "$@" ;;
 "clb") cloud_load_balancer "$@" ;;
