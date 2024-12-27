@@ -100,19 +100,19 @@ create_cluster() {
 
 	if [ "$environment" == "dev" ]; then
 		printf "\nCreating standalone instance:\n"
-		triton inst create -n {{shortId}}"$name_modifier" "$image" "$dev_package" $dev_params -m tag="dev" -t triton.cns.services="dev-$cluster_id"
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$dev_package" $dev_params -m tag="dev" -t triton.cns.services="dev-$cluster_id" -m "dev_control_plane_endpoint=$dev_control_plane_endpoint" -m "dev_cert_sans=$dev_cert_sans"
 
 	elif [ "$environment" == "prod" ]; then
 		printf "\nCreating control-plane members:\n"
-		triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init" $ctr_interfaces
+		triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="init-$cluster_id,ctr-$cluster_id" -m "ctr_count=$num_ctr" -m "wrk_count=$num_wrk" -m tag="init" -m "prod_control_plane_endpoint=$prod_control_plane_endpoint" -m "prod_cert_sans=$prod_cert_sans" -m "int_cns_suffix=$int_cns_suffix" $ctr_interfaces
 		num_ctr=$((num_ctr - 1))
 		for i in $(seq 1 "$num_ctr"); do
-			triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr" $ctr_interfaces
+			triton inst create -n {{shortId}}"$name_modifier" "$image" "$ctr_package" $prd_params -t triton.cns.services="ctr-$cluster_id" -m tag="ctr" -m "int_cns_suffix=$int_cns_suffix" $ctr_interfaces
 		done
 		wait
 		printf "\nCreating data-plane members:\n"
 		for i in $(seq 1 "$num_wrk"); do
-			triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -t tritoncli.ssh.proxy="$(triton inst ls -Hoshortid tag.role=bastion)" -m tag="wrk" $wrk_interfaces
+			triton inst create -n {{shortId}}"$name_modifier" "$image" "$wrk_package" $prd_params -t triton.cns.services="wrk-$cluster_id" -m tag="wrk" -m "int_cns_suffix=$int_cns_suffix" $wrk_interfaces
 		done
 		wait
 	else
@@ -125,7 +125,7 @@ interactive_k8s() {
 		prompt_for_input "Would you like this development instance to be external? (yes/no)?" external false
 		case "$external" in
 		"n" | "no") external="" ;;
-		"y" | "yes") triton network ls -l && prompt_for_input "Enter the External Network UUID:" ext_uuid true ;;
+		"y" | "yes") external="dev" && triton network ls -l && prompt_for_input "Enter the External Network UUID:" ext_uuid true ;;
 		*) echo "Invalid Input, please choose yes/no" && exit 1 ;;
 		esac
 		triton package ls
@@ -164,50 +164,80 @@ interactive_k8s() {
 	*) echo "Invalid Input, please choose dev/prod" && exit 1 ;;
 	esac
 
+	if [ -z "$ext_uuid" ]; then
+		triton network ls -l
+		prompt_for_input "If you would like to attach a CLB later, please enter the external network of CLB:" ext_uuid_clb true
+	fi
+
 	if [ -n "$suffix" ]; then
 		name_modifier=".$suffix"
 	else
 		name_modifier=""
 	fi
 
-	case "$external" in
-	"ctr")
-		ctr_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
-		wrk_interfaces="--nic ipv4_uuid=$in_uuid"
-		;;
-	"wrk")
-		wrk_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
-		ctr_interfaces="--nic ipv4_uuid=$in_uuid"
-		;;
-	"both")
-		ctr_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
-		wrk_interfaces="$ctr_interfaces"
-		;;
-	"dev") dev_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid" ;;
-	esac
+	int_cns_suffix=$(triton cloudapi "/my/networks/$in_uuid" 2>/dev/null | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//' 2>/dev/null)
+	ext_cns_suffix=$(triton cloudapi "/my/networks/$ext_uuid" 2>/dev/null | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//' 2>/dev/null)
+	ext_uuid_clb_suffix=$(triton cloudapi "/my/networks/$ext_uuid_clb" 2>/dev/null | grep -o '"svc\.[^",]*' | sed 's/^"//;s/",*$//' 2>/dev/null)
+
+	prod_control_plane_endpoint="--control-plane-endpoint ctr-$cluster_id.$int_cns_suffix"
+	dev_control_plane_endpoint="--control-plane-endpoint dev-$cluster_id.$int_cns_suffix"
+	if [ -n "$ext_uuid_clb" ]; then
+		prod_cert_sans="--apiserver-cert-extra-sans ctr-$cluster_id.$int_cns_suffix,clb-$cluster_id.$int_cns_suffix,clb-$cluster_id.$ext_uuid_clb_suffix"
+		dev_cert_sans="--apiserver-cert-extra-sans dev-$cluster_id.$int_cns_suffix,clb-$cluster_id.$int_cns_suffix,clb-$cluster_id.$ext_uuid_clb_suffix"
+	else
+		case "$external" in
+		"ctr")
+			ctr_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
+			wrk_interfaces="--nic ipv4_uuid=$in_uuid"
+			prod_cert_sans="--apiserver-cert-extra-sans ctr-$cluster_id.$ext_cns_suffix,clb-$cluster_id.$int_cns_suffix,clb-$cluster_id.$ext_cns_suffix"
+			;;
+		"wrk")
+			wrk_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
+			ctr_interfaces="--nic ipv4_uuid=$in_uuid"
+			prod_cert_sans="--apiserver-cert-extra-sans ctr-$cluster_id.$ext_cns_suffix,clb-$cluster_id.$int_cns_suffix,clb-$cluster_id.$ext_cns_suffix"
+			;;
+		"both")
+			ctr_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
+			wrk_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
+			prod_cert_sans="--apiserver-cert-extra-sans ctr-$cluster_id.$ext_cns_suffix,clb-$cluster_id.$int_cns_suffix,clb-$cluster_id.$ext_cns_suffix"
+			;;
+		"none")
+			ctr_interfaces="--nic ipv4_uuid=$in_uuid"
+			wrk_interfaces="--nic ipv4_uuid=$in_uuid"
+			prod_cert_sans="--apiserver-cert-extra-sans ctr-$cluster_id.$int_cns_suffix,clb-$cluster_id.$int_cns_suffix"
+			;;
+		"dev")
+			dev_interfaces="--nic ipv4_uuid=$in_uuid --nic ipv4_uuid=$ext_uuid"
+			dev_cert_sans="--apiserver-cert-extra-sans dev-$cluster_id.$ext_cns_suffix,clb-$cluster_id.$int_cns_suffix,clb-$cluster_id.$ext_cns_suffix"
+			;;
+		esac
+	fi
 
 	# current setup information for confirmation
 	printf "\nCluster: %s\n" $cluster_id
 	if [ -n "$suffix" ]; then
 		echo "Suffix: $suffix"
 	fi
+	echo "Environment: $environment"
+	echo "Image: $image"
 	if [ "$external" == "ctr" ] || [ "$external" == "both" ] || [ "$external" == "wrk" ] || [ "$external" == "dev" ]; then
 		echo "External: true"
 		echo "External Network UUID: $ext_uuid"
 	fi
+	echo "Internal Network UUID: $in_uuid"
 
 	if [ "$environment" == "dev" ]; then
 		echo "Standalone package: $dev_package"
+		echo "$dev_control_plane_endpoint"
+		echo "$dev_cert_sans"
 	else
 		echo "Control-plane package: $ctr_package"
 		echo "Data-plane package: $wrk_package"
 		echo "Number of control-plane instances: $num_ctr"
 		echo "Number of data-plane instances: $num_wrk"
+		echo "$prod_control_plane_endpoint"
+		echo "$prod_cert_sans"
 	fi
-
-	echo "Internal Network UUID: $in_uuid"
-	echo "Environment: $environment"
-	echo "Image: $image"
 
 	selection
 
@@ -496,7 +526,9 @@ bastion() {
 
 	#interactive for gathering missing parameters
 	if [ "$interactive" == "true" ]; then
+		triton package ls
 		prompt_for_input "Enter the desired bastion package:" package false
+		triton image ls os=smartos | sort -k2,2 -k3,3r
 		prompt_for_input "Enter the desired bastion image:" image false
 		if [ -z "$package" ] || [ -z "$image" ]; then
 			echo "Missing required parameters: bst_package or bst_image"
@@ -504,15 +536,15 @@ bastion() {
 		fi
 	fi
 
-	triton inst create -n {{shortId}}-bastion "$image" "$package" -t triton.cns.services="bastion" -t role="bastion"
+	triton inst create -n bastion "$image" "$package" -t triton.cns.services="bastion" -t role="bastion"
 }
 
 up_cluster() {
 	account=$(triton account get | grep -e 'id:' | sed -e 's/id:\ //') # account UUID
 	kubernetes_version="1.29.8"
 	cluster_id=$(uuidgen | cut -d - -f1 | tr '[:upper:]' '[:lower:]')
-	prd_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
-	dev_params="-b bhyve --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+	prd_params="-b bhyve -t tritoncli.ssh.proxy="bastion" --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
+	dev_params="-b bhyve -t tritoncli.ssh.proxy="bastion" --cloud-config configs/cloud-init -t cluster=$cluster_id -m cluster=$cluster_id -m account=$account -m k8ver=$kubernetes_version"
 
 	if [ "$#" -eq 0 ]; then
 		interactive_k8s
@@ -525,12 +557,11 @@ up_cluster() {
 			*) usage up ;;
 			esac
 		done
-	fi
+		shift $((OPTIND - 1))
 
-	shift $((OPTIND - 1))
-
-	if [ "$OPTIND" -eq 1 ]; then
-		usage up
+		if [ "$OPTIND" -eq 1 ]; then
+			usage up
+		fi
 	fi
 
 }

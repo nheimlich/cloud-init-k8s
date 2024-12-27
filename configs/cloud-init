@@ -80,6 +80,38 @@ write_files:
       rm -rf cilium-linux-${CLI_ARCH}.tar.gz
       kubectl taint node --all node-role.kubernetes.io/control-plane:NoSchedule-
 
+  - path: /usr/local/bin/kubeadm-resize.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      set -x
+      export PRIVIP=$(ip addr | grep -v 'cilium' | grep -Po 'inet \K(192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]{1,3}\.[0-9]{1,3}|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})')
+      expected_wrk_count=$(mdata-get wrk_count)
+      current_wrk_count=$(kubectl get nodes --no-headers --selector node-role.kubernetes.io/data-plane | wc -l)
+
+      recreate_cluster() {
+        kubectl label $(kubectl get nodes --no-headers --selector node-role.kubernetes.io/control-plane!="",node-role.kubernetes.io/data-plane="" -oname) node-role.kubernetes.io/data-plane-old=""
+
+        mkdir -p /var/k8s/
+
+        echo $(kubeadm token create --print-join-command) > /var/k8s/join-wrk.sh
+
+        python3 -m http.server -b $PRIVIP -d /var/k8s/ 8000 &
+        
+        while [[ $(kubectl get nodes --selector node-role.kubernetes.io/control-plane!="",node-role.kubernetes.io/data-plane!="" --no-headers | wc -l) -lt $expected_wrk_count ]]; do sleep 10; done
+
+        kubectl drain --delete-emptydir-data --ignore-daemonsets --force --selector node-role.kubernetes.io/data-plane-old
+
+        pkill -f python3
+      }
+
+      if [ expected_wrk_count == current_wrk_count ]; then
+        exit 0
+      else;
+        recreate_cluster
+      fi
+    
   - path: /usr/local/bin/kubeadm-0.sh
     permissions: '0755'
     content: |
