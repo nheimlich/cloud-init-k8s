@@ -1,71 +1,44 @@
 ## CLOUD INIT K8s /w TRITON
 
-#### REQUIREMENTS:
-- Triton cli v7.17.0 or higher
-- Triton Container Naming Service should be enabled for your account.
+## Requirements
+- **Triton CLI**: Version 7.17.0 or higher.
+- **Triton Container Naming Service (CNS)**: Must be enabled for your account.
 
-#### Goals:
+## Features
+- Automate Kubernetes cluster provisioning and deprovisioning using Triton and CNS.
+- Bootstrap a fully functional Kubernetes cluster with `kubeadm`.
+- Provide additional addons such as CLB and a Bastion Host.
 
-- Bootstrap a fully functional Kubernetes Cluster with Kubeadm using Triton & CNS
-- Automate the provisioning & deprovisioning of clusters
-- Provide Automation for upgrades
+## Features
+### Script: `tk8s.sh`
+A utility script for Cluster provisioning on Triton /w Addons. Actions:
+- **up**: Create a Kubernetes cluster.
+- **down**: Destroy a Kubernetes cluster.
+- **ls**: List existing clusters.
+- **config**: Fetch cluster kubeconfig.
+- **bastion**: Manage a bastion host.
+- **clb**: Manage cloud load balancers.
 
-#### TODO:
-
-- automate provisioning of a container registry as a cache for install components `--image-repository`
-- configure an apt cache server to remove bottlenecks regarding package retrevial times
-
-#### listing out instances per available cluster
-
+**Usage**:
+```sh
+./tk8s.sh <action> [OPTIONS]
+ up      -- create kubernetes cluster
+ down    -- destroy a kubernetes cluster
+ ls      -- show existing clusters
+ config  -- get kubeconfig from an existing cluster
+ bastion -- manage a trk8s bastion host
+ clb     -- manage cloud load balancer services
 ```
-❯ ./tk8s.sh ls
-current clusters:
------------------------
-cluster: 059b69b4
-instances:
-  - (standalone) ed205fa5.nhlabs.test
------------------------
-cluster: ae78e3f9
-instances:
-  - (control-plane) 1862a334.nhlabs.org
-  - (control-plane) 8640ffe6.nhlabs.org
-  - (control-plane) 283f7b28.nhlabs.org
-  - (data-plane) 43b4b466.nhlabs.org
-  - (data-plane) 5347243a.nhlabs.org
-  - (data-plane) f6dae9dc.nhlabs.org
-  - (data-plane) ec652d86.nhlabs.org
-  - (data-plane) 4a90cfdc.nhlabs.org
-```
+- All actions by default run in interactive mode `-i`, to see additonal options run `./tk8s.sh <action> -h`
 
-#### grabbing admin kubeconfig from a Cluster
+**Example: Available CLB options:**
+```sh
 
-```
-> ./tk8s.sh config
-current clusters:
------------------------
-cluster: ae78e3f9
-instances:
-  - (control-plane) 1862a334.nhlabs.org
-  - (control-plane) 8640ffe6.nhlabs.org
-  - (control-plane) 283f7b28.nhlabs.org
-  - (data-plane) 43b4b466.nhlabs.org
-  - (data-plane) 5347243a.nhlabs.org
-  - (data-plane) f6dae9dc.nhlabs.org
-  - (data-plane) ec652d86.nhlabs.org
-  - (data-plane) 4a90cfdc.nhlabs.org
-Enter the Cluster-ID you'd like to grab your kubeconfig from: ae78e3f9
----
-apiVersion: v1
-****
-```
 
-## Addons
-### Cloud Load Balancer
-##### Cloud Load Balancer Options:
-```
-❯ ./tk8s.sh clb
+./tk8s.sh clb -h 
+
 Usage: ./tk8s.sh clb [-i] [-d] [-p package] [-g image]
-  -i              Run in interactive mode.
+  -i              Run in interactive mode. (default)
   -d              Delete an existing bastion instance.
   -c cluster      Specify the associated cluster.
   -p package      Specify the clb package.
@@ -78,122 +51,37 @@ Usage: ./tk8s.sh clb [-i] [-d] [-p package] [-g image]
   -y be_ssl       Specify the backend SSL port.
   -h              Show this help message.
 ```
-##### Creating a Cloud Load Balancer /w flags
+
+### Cloud-Init Configuration
+The included `cloud-init` file automates node setup for the Kubernetes cluster.
+
+**Snippet**:
+```yaml
+#cloud-config
+package_update: false
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/bin/setup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      set -x
+      export DEBIAN_FRONTEND=noninteractive
+      export k8ver=$(mdata-get k8ver)
+
+      apt-get update && apt-get install -y ca-certificates curl gnupg apt-transport-https
+      install -m 0755 -d /etc/apt/keyrings
+      curl --retry 5 -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.gpg
+      ...
 ```
-❯ ./tk8s.sh clb -c a3de2066 -p 48adbe6c -e 468473cf-6450-455d-b298-4e826a5cfce7 -n 468473cf-6450-455d-b298-4e826a5cfce7
-```
-##### Creating a Cloud Load Balancer Interactively
-```
-❯ ./tk8s.sh clb -i
-checking for existing clusters..
-current clusters:
------------------------
-cluster: 455cca75
-instances:
-  - (control-plane) f5d0cd06
-  - (control-plane) 7e3ecf6e
-  - (control-plane) f1438a2a
-  - (data-plane) 6fb2a961
------------------------
-cluster: a3de2066
-...
 
-Enter the Cluster-ID you'd like to associate with your cloud-load-balancer:
-455cca75
+For full details, see the `configs/cloud-init` file included in this repository.
 
-ID                                    NAME               SUBNET            GATEWAY        FABRIC  VLAN  PUBLIC
-468473cf-6450-455d-b298-4e826a5cfce7  Public-01          -                 -              -       -     true
-468473cf-6450-455d-b298-4e826a5cfce7  Public-02          -                 -              -       -     true
-468473cf-6450-455d-b298-4e826a5cfce7  PRIVATE_123        -                 -              -       -     true
-468473cf-6450-455d-b298-4e826a5cfce7  My-Fabric-Network  192.168.128.0/22  192.168.128.1  true    2     false
+## Future Improvements
+- Language Rewrite to support lifecycle operations such as Upgrades & Resizing
+- Provide options for provisioning different K8s versions
 
-Enter the External Network UUID:
-468473cf-6450-455d-b298-4e826a5cfce7
-
-ID                                    NAME               SUBNET            GATEWAY        FABRIC  VLAN  PUBLIC
-468473cf-6450-455d-b298-4e826a5cfce7  Public-01          -                 -              -       -     true
-468473cf-6450-455d-b298-4e826a5cfce7  Public-02          -                 -              -       -     true
-468473cf-6450-455d-b298-4e826a5cfce7  PRIVATE_123        -                 -              -       -     true
-468473cf-6450-455d-b298-4e826a5cfce7  My-Fabric-Network  192.168.128.0/22  192.168.128.1  true    2     false
-
-Enter the Internal Network UUID:
-468473cf-6450-455d-b298-4e826a5cfce7
-
-SHORTID   NAME            MEMORY  SWAP   DISK  VCPUS
-48adbe6c  lb1.small           4G    8G    50G      4
-5b82556d  g1.nano           512M    1G     5G      1
-...
-
-Enter the Package Short ID:
-48adbe6c
-
-No existing load balancer found, creating a new one...
-Cluster: 455cca75
-Package: 48adbe6c
-Replicas: 2
-External Network UUID: 468473cf-6450-455d-b298-4e826a5cfce7
-Internal Network UUID: 468473cf-6450-455d-b298-4e826a5cfce7
-Frontend Kube API port: 6443
-Backend Kube API port: 6443
-Frontend SSL port: 443
-Backend SSL port: 443
-Interactive: true
-
-Would you like to proceed?
-y
-
-Creating instance 9529af7f-clb (9529af7f-eaf5-4cc5-a370-a44888950d40, cloud-load-balancer@)
-Creating instance 97ae7dee-clb (97ae7dee-46e6-4e83-855e-aa993bfc8907, cloud-load-balancer@)
-```
-##### Deleting a Cloud Load Balancer
-```
-❯ ./tk8s.sh clb -d
-```
-### Bastion (SSH)
-##### Bastion Options:
-```
-Usage: ./tk8s.sh bastion [-i] [-d] [-p package] [-g image]
-  -i              Run in interactive mode.
-  -d              Delete an existing bastion instance.
-  -p package      Specify the bastion package.
-  -g image        Specify the bastion image.
-  -h              Show this help message.
-```
-##### Creating a Bastion Instance /w flags
-```
-❯ ./tk8s.sh bastion -p 5b82556d -g 8adac45a
-Checking for an existing bastion host..
-
-Creating instance f47f4d0e-bastion (f47f4d0e-fd99-4ab0-ae98-18e32899df83, base-64-lts@23.4.0)
-```
-##### Creating a Bastion Instance Interactively
-```
-❯ ./tk8s.sh bastion -i
-checking for an existing bastion host..
-
-SHORTID   NAME            MEMORY  SWAP   DISK  VCPUS
-48adbe6c  lb1.small           4G    8G    50G      4
-5b82556d  g1.nano           512M    1G     5G      1
-...
-
-Enter the desired bastion package:
-5b82556d
-
-SHORTID   NAME         VERSION  FLAGS  OS       TYPE          PUBDATE
-8adac45a  base-64-lts  23.4.0   P      smartos  zone-dataset  2024-01-06
-e44ed3e0  base-64-lts  22.4.0   P      smartos  zone-dataset  2023-01-10
-...
-
-Enter the desired bastion image:
-8adac45a
-
-Creating instance 967a4b0c-bastion (967a4b0c-30ef-444a-abc5-2b9ee0aa289e, base-64-lts@23.4.0)
-```
-##### Deleting a Bastion Instance
-```
-❯ ./tk8s.sh bastion -d
-checking for an existing bastion host..
-
-Deleted Instances:
-Delete (async) instance 967a4b0c-bastion (967a4b0c-30ef-444a-abc5-2b9ee0aa289e)
-```
+## License
+This project is provided "as-is" without warranties. Contributions are welcome.
